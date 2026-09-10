@@ -1,0 +1,13 @@
+dist/
+test-results/
+*.user
+# Never commit runtime profiles or credentials.
+Credentials/
+CodexHome/
+DesktopProfile/
+Projectless/
+Projects/
+Backup/
+Logs/
+settings.json
+*.dpapi

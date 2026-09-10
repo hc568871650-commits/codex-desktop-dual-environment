@@ -1,0 +1,19 @@
+name: Windows launcher checks
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test core on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Test-Core.ps1
+      - name: Build portable archive
+        shell: powershell
+        run: ./scripts/Build-Release.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CodexDualLauncher-windows
+          path: dist/*.zip

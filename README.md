@@ -1,4 +1,56 @@
-# Windows Codex Desktop 双环境方案：官方订阅与 API Key Mode 一键切换
+# Codex 双环境启动器 · Windows
+
+现在除了原理说明，仓库还提供一个可以运行的 **Windows 图形启动器**：配置独立 API 环境、加密保存密钥，并通过两个按钮启动官方环境或 API 环境。
+
+> v0.1.0 预览版。已在 Windows PowerShell 5.1 完成核心自动化测试、真实子进程环境测试和图形界面冒烟测试；不同 Codex Desktop 版本、实际服务商请求和完整历史隔离仍需按下文验收。
+
+## 下载与运行
+
+1. 使用 GitHub 的 **Code → Download ZIP** 下载仓库并完整解压；或从 [Releases](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases) 下载 `CodexDualLauncher-0.1.0-windows.zip`。
+2. 双击 **`Start.cmd`**，打开图形窗口。不要只复制 `Start.cmd`，它需要旁边的 `src` 目录。
+3. 选择一个全新的空文件夹作为 API 存储目录。
+4. 填入支持 **Responses API** 的服务地址、模型 ID 和 API Key，点击 **保存 API 配置**。
+5. 点击 **启动 API 环境** 或 **启动官方环境**。首次启动 API 环境后，按[使用指南](docs/USAGE.md#首次隔离验收)检查实际效果。
+
+**要求：** Windows 10/11、Windows PowerShell 5.1，以及已经安装的 Codex Desktop。无需 Python、Node.js、管理员权限或额外 .NET SDK。启动入口只对自身 PowerShell 进程设置执行策略，不修改系统执行策略；组织策略禁止脚本时仍可能无法运行。
+
+## 第一版能做什么
+
+| 功能 | 行为 |
+|---|---|
+| 图形配置 | 选择 API 数据目录、地址、模型、密钥和可选桌面程序路径 |
+| 独立启动 | API 进程使用独立 `CODEX_HOME`、`--user-data-dir` 和任务目录配置 |
+| 自动寻找程序 | 每次查询 Store 安装位置，也可以手动选择桌面程序 |
+| 密钥加密 | Windows DPAPI 当前用户加密；仅注入 API 子进程，不写进快捷方式、TOML 或用户级环境变量 |
+| 更新与备份 | 密钥留空时保留原值；更新前确认并备份旧 `config.toml` |
+| 环境检查 | 显示程序路径、目录状态、凭据解密结果及匹配 profile 参数的进程数量 |
+| 路径保护 | 拒绝已有非空未托管目录、与已知环境重叠的路径、网络路径和目录联接 |
+
+目前不包含多服务商切换、CC Switch 自动接管、历史迁移、付费 API 连通性测试或一键卸载。它不会下载或打包 Codex 本体。
+
+API Key 不会显示在诊断结果中。DPAPI 保护的是磁盘上的密钥；同一 Windows 账户下运行的程序仍可能解密，不能将它当作对同账户恶意软件的防护。
+
+## 开发与验证
+
+```powershell
+# 在仓库根目录，使用 Windows PowerShell 5.1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\Test-Core.ps1
+
+# 打包可分发 ZIP；重复版本不会覆盖已有文件
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\Build-Release.ps1
+```
+
+测试使用 `test-results` 中的独立目录和假密钥，不调用真实 API。GitHub Actions 会运行核心测试并生成可下载的 ZIP 构建产物。发布版本之前仍应完成真实 Codex 双窗口验收，不能把测试通过等同于所有版本都兼容。
+
+实测发现与验证边界见 [验证记录](docs/VALIDATION.md)。API 配置显式限制为 API 登录，并使用无真实密钥的认证占位标记，防止误入原账号模式。
+
+源码入口：[`src/Launcher.ps1`](src/Launcher.ps1)；核心逻辑：[`src/Core.ps1`](src/Core.ps1)。详细使用方法、恢复步骤与限制见 [使用指南](docs/USAGE.md)。
+
+自定义 provider 的 `base_url`、`env_key` 配置参考 [OpenAI 官方配置文档](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers)。本仓库中的 Desktop profile 双开方式属于需要逐版本实测的方案，不是官方多开兼容保证。
+
+---
+
+## 双环境方案与背景
 
 > 适合觉得 Codex Desktop 图形界面很好用，但官方订阅额度不够，又不想每天手动修改 API 路由、登录状态和配置文件的人。
 
@@ -11,7 +63,7 @@
 
 日常使用时不需要临时修改路由或反复登录，只需点击对应的桌面图标。
 
-更舒服的一点是：**官方版和 API 版可以同时开启，并且互不干扰**。你可以让官方版处理重要项目或依赖订阅能力的任务，同时把批量、耗时或更消耗额度的任务交给 API 版；两边拥有各自的项目、历史和运行进程，可以像两名独立助手一样并行工作，自由分配任务，而不必等一个窗口完成后再切换路由。
+在桌面版本支持独立 profile、且完成隔离验收的前提下，**官方版和 API 版可以同时开启**。你可以让官方版处理重要项目或依赖订阅能力的任务，同时把批量、耗时或更消耗额度的任务交给 API 版；两边拥有各自的项目、历史和运行进程，可以像两名独立助手一样并行工作，自由分配任务，而不必等一个窗口完成后再切换路由。
 
 ```text
 同一份 Codex Desktop
@@ -282,7 +334,7 @@ Codex API
 
 ### 可以同时打开官方版和 API 版吗？
 
-可以，而且这正是双环境方案相较于手动切换路由的一项核心优势。前提是 API 版使用独立 Desktop profile，否则桌面应用可能把第二次启动合并到已有进程。
+目标是同时开启，但需要当前桌面版本实际支持并通过隔离验收。API 版必须使用生效的独立 Desktop profile，否则桌面应用可能把第二次启动合并到已有进程。
 
 隔离正确后，两个窗口可以长期同时运行：官方版与 API 版分别维护自己的项目、会话和进程。你可以按项目重要程度、可用额度、模型能力或任务耗时自由分工，例如一个窗口负责主项目，另一个窗口执行资料整理、批量修改或长时间任务。
 
@@ -315,7 +367,7 @@ Codex API
 
 ## 实践结论
 
-Windows 上的 Codex Desktop 可以通过“一份应用程序 + 两套数据环境”实现官方订阅与 API Key Mode 的长期共存。
+本方案尝试通过“一份应用程序 + 两套数据环境”实现官方订阅与 API Key Mode 的长期共存；实际兼容性应以当前桌面版本的隔离验收结果为准。
 
 真正可靠的双环境并不是简单切换 `base_url`，而是同时隔离 `CODEX_HOME`、Desktop profile、无项目任务目录和凭据。完成这些隔离后，复杂配置可以被封装在启动器中，用户日常只需要选择“Codex 官方”或“Codex API”。
 
