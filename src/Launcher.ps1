@@ -143,7 +143,7 @@ try {
                 Write-AtomicText $SettingsPath ($values | ConvertTo-Json)
                 $keyBox.Clear()
                 $script:savedSignature = $values | ConvertTo-Json -Compress
-                $status.Text = '已保存。点击“启动 API 环境”，然后完成首次隔离验证。'
+                $status.Text = '已保存。请从托盘控制器启动 API 环境，再完成隔离验证。'
                 $reportBox.Text = Get-EnvironmentReport $values.root $values.officialHome $values.executable
             } finally { if ($null -ne $secure) { $secure.Dispose() } }
         }
@@ -174,6 +174,9 @@ try {
             $status.Text = '检查完成，结果见下方。'
         }
     }
+    # Legacy configuration UI is retained, but all supported launch entries now use Controller.ps1.
+    $officialButton.Enabled=$false;$officialButton.Text='请使用托盘启动'
+    $apiButton.Enabled=$false;$apiButton.Text='请使用托盘启动'
     [void](Add-Button $form '打开目录' 782 542 150 {
         Invoke-UiAction {
             $path = Get-FullDirectory $rootBox.Text.Trim()
@@ -181,7 +184,7 @@ try {
             Start-Process -FilePath explorer.exe -ArgumentList ('"' + $path + '"')
         }
     })
-    $status = Add-Label $form '填写 API 地址、模型和密钥，保存后即可启动。' 30 594 900 26
+    $status = Add-Label $form '填写并保存 API 配置；请从托盘控制器启动实例。' 30 594 900 26
     $status.ForeColor = [Drawing.ColorTranslator]::FromHtml('#176B51')
     $reportBox = New-Object Windows.Forms.TextBox
     $reportBox.SetBounds(28, 630, 904, 122)

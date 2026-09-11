@@ -148,6 +148,13 @@ function Save-ApiEnvironment {
 
 function Find-CodexExecutable([string]$ExplicitPath) {
     if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        if (Test-Path -LiteralPath $ExplicitPath -PathType Container) {
+            foreach ($relative in @('app\ChatGPT.exe','app\Codex.exe','ChatGPT.exe','Codex.exe')) {
+                $candidate = Join-Path $ExplicitPath $relative
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) { return [IO.Path]::GetFullPath($candidate) }
+            }
+            throw '指定安装目录内未找到桌面程序。'
+        }
         if (-not (Test-Path -LiteralPath $ExplicitPath -PathType Leaf) -or [IO.Path]::GetExtension($ExplicitPath) -ne '.exe') {
             throw '指定的桌面程序不存在，请选择 Codex Desktop 的 ChatGPT.exe 或 Codex.exe。'
         }

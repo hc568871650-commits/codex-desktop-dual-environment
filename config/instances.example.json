@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "stateDirectory": "C:\\Example\\ControllerState",
+  "instances": [
+    {
+      "id": "11111111111111111111111111111111",
+      "role": "official",
+      "home": "C:\\Example\\Official\\CodexHome",
+      "profile": "",
+      "projects": "C:\\Example\\Official\\Projects",
+      "projectless": "C:\\Example\\Official\\Projectless",
+      "executable": "",
+      "launchMode": "official"
+    },
+    {
+      "id": "22222222222222222222222222222222",
+      "role": "api",
+      "home": "C:\\Example\\API\\CodexHome",
+      "profile": "C:\\Example\\API\\DesktopProfile",
+      "projects": "C:\\Example\\API\\Projects",
+      "projectless": "C:\\Example\\API\\Projectless",
+      "executable": "",
+      "launchMode": "managed-api",
+      "apiRoot": "C:\\Example\\API"
+    }
+  ]
+}
