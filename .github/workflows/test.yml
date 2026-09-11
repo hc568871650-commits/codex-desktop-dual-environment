@@ -15,7 +15,9 @@ jobs:
         run: ./tests/Test-Instances.ps1 -Integration
       - name: Test deployment lifecycle
         shell: powershell
-        run: ./tests/Test-Install.ps1
+        run: |
+          ./tests/Trace-ShortcutEncoding.ps1
+          ./tests/Test-Install.ps1
       - name: Test tray lifecycle
         shell: powershell
         run: ./tests/Test-Controller.ps1
