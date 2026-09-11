@@ -9,7 +9,7 @@ $exe="$env:SystemRoot\System32\notepad.exe"
 function Check($value,$name){if(-not $value){throw "FAIL: $name"};Write-Output "PASS: $name"}
 $configPath=Join-Path $install 'instances.local.json';$before=(Get-FileHash -LiteralPath $configPath).Hash
 Check (Test-Path -LiteralPath "$install\src\Controller.ps1") 'Controller installed'
-Check (@(Get-ChildItem -LiteralPath $links -Filter *.lnk).Count -eq 3) 'Three shortcuts created'
+Check ((@(Get-ChildItem -LiteralPath $links -Filter *.lnk | Select-Object -ExpandProperty Name | Sort-Object) -join '|') -eq 'Codex API.lnk|Codex Dual Controller.lnk|Codex Official.lnk') 'Three ASCII-named shortcuts created'
 $shell=New-Object -ComObject WScript.Shell
 $linkFile=@(Get-ChildItem -LiteralPath $links -Filter *.lnk)[0]
 $moved=Join-Path $root 'Moved.lnk';Move-Item -LiteralPath $linkFile.FullName -Destination $moved

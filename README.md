@@ -15,7 +15,7 @@
 1. 完整解压工具到固定目录，双击 `Install.cmd`。
 2. 输入现有官方 `CODEX_HOME` 的绝对路径、API 地址、模型 ID 和密钥。密钥隐藏输入，使用当前 Windows 用户 DPAPI 加密。
 3. 默认工具装入 `%LOCALAPPDATA%\CodexDualController`，新 API 数据装入 `%LOCALAPPDATA%\CodexDualData\API`。官方数据保持原位，默认沿用原生 Desktop profile，不复制官方认证或历史。
-4. 使用生成的 **Codex 双环境控制器**、**Codex 官方**、**Codex API** 快捷方式。安装过程不启动或关闭 Codex。
+4. 使用生成的 **Codex Dual Controller**（控制面板）、**Codex Official**（官方版）、**Codex API**（API 版）快捷方式。安装过程不启动或关闭 Codex。
 5. 打开“Codex 双环境控制器”小面板，点击官方版/API版。可右键安装目录的 `CodexDualController.exe` 选择“固定到任务栏”；之后点击固定图标即可找回面板。托盘也可以选择“启动或显示”。已运行时定位已有窗口；多个主窗口时选择；未运行时才启动。
 
 已有官方 `config.toml` 必须具有可解析的 `[desktop] projectlessWorkspaceRoot`；安装器读取该设置并保留它，缺失时提示手动设置，不静默改写原配置。没有任何数据的全新官方目录才会生成最小配置。
@@ -66,6 +66,14 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts\Install.ps1
 ## 卸载与回滚
 
 先从托盘退出控制器，然后运行安装目录的 `Uninstall.cmd`。它按安装清单和文件哈希删除新增工具文件、原位置未修改的快捷方式，**保留两套数据、凭据、本机配置和修改过的文件**。不修改系统环境变量、启动项、协议关联或官方程序包。
+
+### 快捷方式与英文路径
+
+维护版本生成的快捷方式统一使用英文文件名：`Codex Dual Controller.lnk`、`Codex Official.lnk`、`Codex API.lnk`，界面仍为中文。已有环境部署入口也使用 `Codex Dual Controller.lnk`。已发布的 v0.2.0 附件仍使用旧名称，此改动以当前 main 源码为准。
+
+为兼容英文 Windows 等系统，建议快捷方式保存的**完整目录路径**也只包含英文字母、数字、空格及常规路径符号，例如 `D:\CodexDual\Shortcuts`。仅修改 `.lnk` 文件名，不能解决其上级目录含中文时的旧 WScript 接口兼容问题。中文 Windows 上原有中文路径可能正常，不需要因此搬动已经正常使用的环境。
+
+安装器默认仍使用系统实际桌面目录，支持桌面位于 D 盘；需要避开中文桌面路径时，可为安装命令附加 `-ShortcutDirectory 'D:\CodexDual\Shortcuts'`。已有环境部署脚本 `scripts/Deploy-Controller.ps1` 也支持此参数。该参数只指定新快捷方式的位置，不会移动桌面、改名用户目录或更改 Codex 数据路径。安装后可将快捷方式导入收纳软件；移动后的原位置卸载追踪限制见下文。
 
 快捷方式可以移入收纳应用，目标、配置与图标均采用固定绝对路径。移动后卸载器不会扫描寻找它，请手动删除。工具安装目录本身不能随意移动；要更换位置应重新生成快捷方式。
 

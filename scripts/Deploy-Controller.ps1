@@ -12,7 +12,7 @@ if((Test-Path -LiteralPath $root) -and @(Get-ChildItem -LiteralPath $root -Force
 foreach($instance in $config.instances){foreach($key in @('home','profile','projects','projectless')){if($instance.$key -and (Test-PathOverlap $root $instance.$key)){throw '工具目录必须与用户数据目录分离。'}}}
 if(-not $ShortcutDirectory){$ShortcutDirectory=$root}
 $ShortcutDirectory=Get-FullDirectory $ShortcutDirectory;Assert-NoReparsePoint $ShortcutDirectory
-$shortcutPath=Join-Path $ShortcutDirectory 'Codex 双环境.lnk'
+$shortcutPath=Join-Path $ShortcutDirectory 'Codex Dual Controller.lnk'
 if(Test-Path -LiteralPath $shortcutPath){throw '同名快捷方式已存在，保留原文件。'}
 $source=Split-Path $PSScriptRoot -Parent
 $config.stateDirectory=Join-Path $root 'state'

@@ -82,7 +82,7 @@ try {
     if(-not $NoShortcuts){
         $installStage='创建快捷方式'
         [void][IO.Directory]::CreateDirectory($ShortcutDirectory);$shell=New-Object -ComObject WScript.Shell
-        foreach($pair in @(@('Codex 官方','official','official.ico'),@('Codex API','api','api.ico'),@('Codex 双环境控制器','tray','controller.ico'))){
+        foreach($pair in @(@('Codex Official','official','official.ico'),@('Codex API','api','api.ico'),@('Codex Dual Controller','tray','controller.ico'))){
             $linkPath=Join-Path $ShortcutDirectory ($pair[0]+'.lnk')
             if(Test-Path -LiteralPath $linkPath){throw '同名快捷方式已存在，保留原文件；请选择空快捷方式目录。'}
             $link=$shell.CreateShortcut($linkPath);$link.TargetPath="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
