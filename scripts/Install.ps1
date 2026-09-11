@@ -57,6 +57,7 @@ $source=Split-Path $PSScriptRoot -Parent
 $manifest=[ordered]@{schema=1;root=$install;files=@();shortcuts=@();retainedData=@($official,$data);created= [DateTime]::UtcNow.ToString('o')}
 function Save-Manifest {Write-AtomicText (Join-Path $install 'install-manifest.json') ($manifest | ConvertTo-Json -Depth 6)}
 Save-Manifest
+$installStage='复制工具文件'
 try {
     foreach($part in @('.gitignore','version.json','src','scripts','assets','config','docs','README.md','Controller.cmd','Uninstall.cmd','Start.cmd','Install.cmd','Configure.cmd','Upgrade.cmd','Rollback.cmd')){
         $sourcePart=Join-Path $source $part
@@ -67,15 +68,19 @@ try {
             $manifest.files+=@{path=$relative;sha256=(Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash};Save-Manifest
         }
     }
+    $installStage='保存 API 环境'
     [void](Save-ApiEnvironment -Root $apiRoot -OfficialHome $official -BaseUrl $BaseUrl -Model $Model -Key $ApiKey)
+    $installStage='写入实例配置'
     foreach($path in @($official,$officialProjects,$officialProjectless,$OfficialProfile)){if($path){[void][IO.Directory]::CreateDirectory($path)}}
     if($newOfficialConfig){Write-AtomicText $officialConfig ("[desktop]`r`nprojectlessWorkspaceRoot = "+(ConvertTo-TomlString $officialProjectless)+"`r`n")}
     Write-AtomicText $configPath ($config | ConvertTo-Json -Depth 6)
     $hostPath=Join-Path $install 'CodexDualController.exe'
+    $installStage='编译控制器 EXE'
     & "$PSScriptRoot\Build-ControllerHost.ps1" -Destination $hostPath | Out-Null
     $manifest.files+=@{path='CodexDualController.exe';sha256=(Get-FileHash -LiteralPath $hostPath).Hash};Save-Manifest
     # Local configuration is retained on uninstall as a recovery aid; it contains no credentials.
     if(-not $NoShortcuts){
+        $installStage='创建快捷方式'
         [void][IO.Directory]::CreateDirectory($ShortcutDirectory);$shell=New-Object -ComObject WScript.Shell
         foreach($pair in @(@('Codex 官方','official','official.ico'),@('Codex API','api','api.ico'),@('Codex 双环境控制器','tray','controller.ico'))){
             $linkPath=Join-Path $ShortcutDirectory ($pair[0]+'.lnk')
@@ -88,5 +93,11 @@ try {
         }
     }
     Write-Output "安装完成：$install。用户数据：$data。未启动或停止任何 Codex 实例。"
-}catch{Save-Manifest;throw '安装未完成。已记录新增工具文件，可运行安装目录 scripts\Uninstall.ps1 回滚工具；数据保留。原配置没有覆盖。'}
+}catch{
+    $installError=$_
+    # A recovery-write failure must not replace the original installation error.
+    try{Save-Manifest}catch{Write-Warning '安装记录补写失败；已有清单可能不完整。'}
+    Write-Warning ("安装未完成，失败阶段：$installStage。可运行安装目录 scripts\Uninstall.ps1 按已有清单回滚工具；数据保留。")
+    throw $installError
+}
 finally{if($ApiKey){$ApiKey.Dispose()}}
