@@ -69,7 +69,7 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts\Install.ps1
 
 ### 快捷方式与英文路径
 
-维护版本生成的快捷方式统一使用英文文件名：`Codex Dual Controller.lnk`、`Codex Official.lnk`、`Codex API.lnk`，界面仍为中文。已有环境部署入口也使用 `Codex Dual Controller.lnk`。已发布的 v0.2.0 附件仍使用旧名称，此改动以当前 main 源码为准。
+维护版本生成的快捷方式统一使用英文文件名：`Codex Dual Controller.lnk`、`Codex Official.lnk`、`Codex API.lnk`，界面仍为中文。已有环境部署入口也使用 `Codex Dual Controller.lnk`。v0.2.0 发布附件已于 2026-09-11 同步此修复；此前下载的旧附件请重新下载。
 
 为兼容英文 Windows 等系统，建议快捷方式保存的**完整目录路径**也只包含英文字母、数字、空格及常规路径符号，例如 `D:\CodexDual\Shortcuts`。仅修改 `.lnk` 文件名，不能解决其上级目录含中文时的旧 WScript 接口兼容问题。中文 Windows 上原有中文路径可能正常，不需要因此搬动已经正常使用的环境。
 
