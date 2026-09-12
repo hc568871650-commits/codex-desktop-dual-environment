@@ -6,6 +6,8 @@ $config=Get-Content -LiteralPath "$PSScriptRoot\..\config\instances.example.json
 $config.stateDirectory="$root\state"
 foreach($i in $config.instances){$i.home="$root\$($i.role)\CodexHome";$i.profile="$root\$($i.role)\DesktopProfile";$i.projects="$root\$($i.role)\Projects";$i.projectless="$root\$($i.role)\Projectless";$i.executable="$env:SystemRoot\System32\notepad.exe";if($i.role -eq 'api'){$i.apiRoot="$root\api"}}
 $path="$root\instances.local.json";Write-AtomicText $path ($config|ConvertTo-Json -Depth 5)
+$fake=ConvertTo-SecureString 'fixture-panel-key' -AsPlainText -Force
+try{[void](Save-ApiEnvironment $config.instances[1].apiRoot $config.instances[0].home 'https://example.com/v1' 'example-model' $fake)}finally{$fake.Dispose()}
 $controller=[IO.Path]::GetFullPath("$PSScriptRoot\..\src\Controller.ps1")
 & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $controller -ConfigPath $path -SmokeTest -ScreenshotPath "$root\menu.png"
 if($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath "$root\menu.png")){throw 'Tray smoke failed'}
@@ -14,7 +16,9 @@ Write-Output 'PASS: actual tray menu renders and disposes without exiting Codex'
 if($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath "$root\panel.png")){throw 'Panel smoke failed'}
 Write-Output 'PASS: taskbar control panel renders and disposes'
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$mutex=New-Object Threading.Mutex($true,('Local\CodexDual.Controller.'+$sid))
+$algorithm=[Security.Cryptography.SHA256]::Create()
+try{$hash=[BitConverter]::ToString($algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($path.ToLowerInvariant()))).Replace('-','')}finally{$algorithm.Dispose()}
+$mutex=New-Object Threading.Mutex($true,('Local\CodexDual.Controller.'+$sid+'.Smoke.'+$hash))
 try{
     $psi=New-Object Diagnostics.ProcessStartInfo;$psi.FileName="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe";$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true
     $psi.Arguments='-NoProfile -STA -ExecutionPolicy Bypass -File "'+$controller+'" -ConfigPath "'+$path+'" -SmokeTest'

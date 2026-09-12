@@ -1,20 +1,20 @@
-# 从 0.1 升级到 0.2
+# 从 0.1 / 0.2 升级到 0.3
 
-无需重新输入密钥，也不搬动原来的 Codex 数据。升级只在工具目录内进行，默认读取 `%LOCALAPPDATA%\CodexDualLauncher\settings.json`，这是 0.1 启动器的设置位置。
+无需重新输入密钥，也不搬动原来的 Codex 数据。升级只在工具目录内进行。0.2 保留现有 instances.local.json；仅迁移 0.1 时默认读取 `%LOCALAPPDATA%\CodexDualLauncher\settings.json`，这是 0.1 启动器的设置位置。
 
 ## 推荐：使用升级包
 
-1. 将 `CodexDualLauncher-0.1-to-0.2.0-upgrade.zip` 解压到一个新文件夹。
+1. 将 `CodexDualLauncher-0.x-to-0.3.0-upgrade.zip` 解压到一个新文件夹。
 2. 关闭旧版启动器/控制器窗口。**官方和 API Codex 可以继续运行，不需要退出。**
 3. 双击新文件夹里的 **Upgrade.cmd**，选择旧工具文件夹：里面应当有 `Start.cmd` 和 `src`。不要选择官方 home 或 API 数据目录。
-4. 升级完成后双击旧目录的 **Start.cmd**，打开 0.2 面板。
+4. 升级完成后双击旧目录的 **Start.cmd**，打开 0.3 面板。
 
 这条路径先检查、备份旧工具文件，再替换；任何被更新的工具文件都记入 `upgrades\<时间与随机ID>\upgrade.local.json`。源升级包不用留在原位置，旧工具目录仍是固定运行目录。
 
 ## 也支持：直接覆盖解压
 
 1. 关闭旧启动器/控制器；两套 Codex 保持运行。
-2. 将 **0.2 完整包**解压到旧工具文件夹，同名工具文件选择替换。
+2. 将 **0.3 完整包**解压到旧工具文件夹，同名工具文件选择替换。
 3. 双击 **Start.cmd**。首次运行会读取原 0.1 设置、生成本机实例配置及任务栏控制程序，以后启动复用它们。
 
 完整包不包含 `settings.json`、`instances.local.json`、认证、密钥或用户数据，所以不会通过压缩包同名文件覆盖这些内容。
@@ -45,8 +45,10 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts\Upgrade.ps1
 
 ## 回滚
 
-关闭控制器，在 0.2 工具或升级包中双击 **Rollback.cmd**，选择此次升级的 `upgrades\...` 备份文件夹。也可用 `scripts\Rollback-Upgrade.ps1 -Snapshot <备份路径>`。
+关闭控制器，在 0.3 工具或升级包中双击 **Rollback.cmd**，选择此次升级的 `upgrades\...` 备份文件夹。也可用 `scripts\Rollback-Upgrade.ps1 -Snapshot <备份路径>`。
 
 回滚前会核对升级后文件和备份哈希。工具或控制配置已经被用户改动时停止，避免覆盖新修改。新增用户项目目录即使为空也不自动删除。回滚记录和备份保留；原 0.1 设置、凭据与用户数据始终保留。
 
 如果自动恢复遇到文件锁、磁盘或权限问题，记录会标注 `RollbackIncomplete`，不会宣称已回滚成功。保留备份并先排除阻塞原因，不要清空数据目录。
+
+0.3 的名称、面板位置保存在 state 目录，API 渠道及加密快照保存在 API 数据目录，均不属于覆盖升级文件。回滚到旧版前先关闭 0.3 自启动开关。

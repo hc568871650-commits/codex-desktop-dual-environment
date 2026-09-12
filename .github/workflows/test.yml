@@ -21,12 +21,20 @@ jobs:
       - name: Test tray lifecycle
         shell: powershell
         run: ./tests/Test-Controller.ps1
+      - name: Test 0.3 experience and configuration isolation
+        shell: powershell
+        run: ./tests/Test-Experience.ps1
+      - name: Test compiled controller interactions
+        shell: powershell
+        run: ./tests/Test-Host.ps1
       - name: Package
         shell: powershell
         run: ./tests/Test-Upgrade.ps1
       - name: Build release
         shell: powershell
-        run: ./scripts/Build-Release.ps1
+        run: |
+          ./scripts/Build-Release.ps1
+          ./scripts/Build-UpgradePackage.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: CodexDualLauncher-windows

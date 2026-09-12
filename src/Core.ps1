@@ -1,6 +1,69 @@
 ﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductId = 'codex-desktop-dual-environment/v1'
+if (-not ('CodexDual.TomlConfig' -as [type])) { Add-Type -Path "$PSScriptRoot\TomlConfig.cs" }
+
+function Get-ApiManagementMode([string]$Root) {
+    $path=Join-Path $Root '.codex-dual.json'
+    if(Test-Path -LiteralPath $path){
+        Assert-NoReparsePoint $path
+        $meta=Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+        if($meta.PSObject.Properties['managementMode']){return [string]$meta.managementMode}
+    }
+    return 'builtin'
+}
+function Read-ApiAuth([string]$Path) {
+    try{return Get-Content -LiteralPath $Path -Raw -Encoding UTF8|ConvertFrom-Json}
+    catch{throw '无法读取 API 认证文件，请检查文件存在且为有效 JSON；未输出认证内容。'}
+}
+
+function Merge-ApiConfig([string]$Text,[string]$Root,[string]$BaseUrl,[string]$Model) {
+    # Validate input before touching the source. Each edit preserves all other text.
+    [void](New-ApiConfig $Root $BaseUrl $Model)
+    $initial=New-Object CodexDual.TomlConfig($Text)
+    $provider=$initial.GetString('model_provider')
+    if($provider -and $provider -ne 'dual-api'){throw '当前配置已选择其他服务商，请先核对管理方式；内置管理不会直接覆盖外部服务商。'}
+    if($initial.HasPrefix('model_providers.dual-api.auth') -or $initial.HasPrefix('model_providers.dual-api.experimental_bearer_token')){throw '受管理服务商存在其他认证配置，请先处理冲突。'}
+    $fields=[ordered]@{
+        forced_login_method='"api"';cli_auth_credentials_store='"file"';model_provider='"dual-api"';model=(ConvertTo-TomlString $Model.Trim())
+        'model_providers.dual-api.name'='"API Environment"';'model_providers.dual-api.base_url'=(ConvertTo-TomlString $BaseUrl.Trim().TrimEnd('/'))
+        'model_providers.dual-api.wire_api'='"responses"';'model_providers.dual-api.requires_openai_auth'='false';'model_providers.dual-api.env_key'='"CODEX_DUAL_API_KEY"'
+        'desktop.projectlessWorkspaceRoot'=(ConvertTo-TomlString (Join-Path $Root 'Projectless'))
+    }
+    foreach($field in $fields.Keys){$document=New-Object CodexDual.TomlConfig($Text);$Text=$document.Set($field,$fields[$field])}
+    return $Text
+}
+
+function Write-AtomicBytes([string]$Path,[byte[]]$Bytes) {
+    $temporary=$Path+'.'+[Guid]::NewGuid().ToString('N')+'.tmp'
+    try{
+        [IO.File]::WriteAllBytes($temporary,$Bytes)
+        if(Test-Path -LiteralPath $Path){[IO.File]::Replace($temporary,$Path,[NullString]::Value)}else{[IO.File]::Move($temporary,$Path)}
+    }finally{if(Test-Path -LiteralPath $temporary){[IO.File]::Delete($temporary)}}
+}
+
+function Write-ApiTransaction([string]$Root,[System.Collections.IDictionary]$Changes) {
+    $allowed=@('CodexHome\config.toml','CodexHome\auth.json','Credentials\api-key.dpapi','.codex-dual.json','api-providers.local.json')
+    $before=@{};$written=New-Object 'Collections.Generic.List[string]'
+    foreach($relative in $Changes.Keys){
+        if($relative -notin $allowed){throw 'API 事务包含非受管理文件。'}
+        $path=Join-Path $Root $relative;Assert-NoReparsePoint $path
+        $before[$relative]=if(Test-Path -LiteralPath $path){[IO.File]::ReadAllBytes($path)}else{$null}
+        if(Test-Path -LiteralPath $path){$probe=[IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None);$probe.Dispose()}
+    }
+    try{
+        foreach($relative in $Changes.Keys){
+            $path=Join-Path $Root $relative;$written.Add($relative)
+            if($null -eq $Changes[$relative]){if(Test-Path -LiteralPath $path){[IO.File]::Delete($path)}}
+            else{[void][IO.Directory]::CreateDirectory((Split-Path $path -Parent));Write-AtomicBytes $path $Changes[$relative]}
+        }
+    }catch{
+        $failure=$_;$restoreFailed=$false
+        foreach($relative in $written){try{$path=Join-Path $Root $relative;if($null -eq $before[$relative]){if(Test-Path -LiteralPath $path){[IO.File]::Delete($path)}}else{Write-AtomicBytes $path $before[$relative]}}catch{$restoreFailed=$true}}
+        if($restoreFailed){Write-Warning 'API 文件回退未全部完成，请使用配置备份恢复。'}
+        throw $failure
+    }
+}
 
 function Get-FullDirectory([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathRooted($Path)) {
@@ -113,11 +176,14 @@ function Write-AtomicText([string]$Path, [string]$Text) {
 function Save-ApiEnvironment {
     param([string]$Root, [string]$OfficialHome, [string]$BaseUrl, [string]$Model, [Security.SecureString]$Key)
     $rootPath = Assert-EnvironmentRoot $Root $OfficialHome
+    if((Get-ApiManagementMode $rootPath) -ne 'builtin'){throw 'API 配置由 CCS 管理，请在 CCS 中修改；需要返回内置管理时请使用控制面板的恢复入口。'}
     $configText = New-ApiConfig $rootPath $BaseUrl $Model
+    $configPath = Join-Path $rootPath 'CodexHome\config.toml'
+    if(Test-Path -LiteralPath $configPath){$configText=Merge-ApiConfig ([IO.File]::ReadAllText($configPath)) $rootPath $BaseUrl $Model}
     $keyPath = Join-Path $rootPath 'Credentials\api-key.dpapi'
     $authPath = Join-Path $rootPath 'CodexHome\auth.json'
     if (Test-Path -LiteralPath $authPath) {
-        $existingAuth = Get-Content -LiteralPath $authPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $existingAuth = Read-ApiAuth $authPath
         if ($existingAuth.auth_mode -ne 'apikey' -or $existingAuth.OPENAI_API_KEY -ne 'CODEX_DUAL_ENV_KEY' -or
             @($existingAuth.PSObject.Properties.Name | Where-Object { $_ -notin @('auth_mode','OPENAI_API_KEY') }).Count -gt 0) {
             throw '此 API 目录已有其他登录凭据，工具不会覆盖。请另选空目录。'
@@ -136,13 +202,14 @@ function Save-ApiEnvironment {
         $backupPath = Join-Path $rootPath ('Backup\config-' + [DateTime]::Now.ToString('yyyyMMdd-HHmmss-fff') + '-' + [Guid]::NewGuid().ToString('N') + '.toml')
         [IO.File]::Copy($configPath, $backupPath, $false)
     }
-    if ($encrypted) { Write-AtomicText $keyPath $encrypted }
+    $changes=@{'CodexHome\config.toml'=[Text.Encoding]::UTF8.GetBytes($configText)}
+    if ($encrypted) { $changes['Credentials\api-key.dpapi']=[Text.Encoding]::UTF8.GetBytes($encrypted) }
     # Non-secret mode marker. Provider authentication uses the DPAPI key via env_key.
     if (-not (Test-Path -LiteralPath $authPath)) {
-        Write-AtomicText $authPath '{"auth_mode":"apikey","OPENAI_API_KEY":"CODEX_DUAL_ENV_KEY"}'
+        $changes['CodexHome\auth.json']=[Text.Encoding]::UTF8.GetBytes('{"auth_mode":"apikey","OPENAI_API_KEY":"CODEX_DUAL_ENV_KEY"}')
     }
-    Write-AtomicText $configPath $configText
-    Write-AtomicText $marker (@{product=$script:ProductId; baseUrl=$BaseUrl.Trim(); model=$Model.Trim()} | ConvertTo-Json)
+    $changes['.codex-dual.json']=[Text.Encoding]::UTF8.GetBytes((@{product=$script:ProductId;managementMode='builtin';baseUrl=$BaseUrl.Trim().TrimEnd('/');model=$Model.Trim()}|ConvertTo-Json))
+    Write-ApiTransaction $rootPath $changes
     return $rootPath
 }
 
@@ -184,16 +251,30 @@ function New-CodexStartInfo {
     if ($Api) {
         $rootPath = Assert-EnvironmentRoot $ApiRoot $OfficialHome
         if (-not (Test-Path -LiteralPath (Join-Path $rootPath '.codex-dual.json'))) { throw '请先保存 API 环境。' }
-        foreach ($required in @('CodexHome\config.toml','CodexHome\auth.json','Credentials\api-key.dpapi')) {
+        $ccs=(Get-ApiManagementMode $rootPath) -eq 'ccs'
+        $requiredFiles=@('CodexHome\config.toml','CodexHome\auth.json')
+        if(-not $ccs){$requiredFiles+=@('Credentials\api-key.dpapi')}
+        foreach ($required in $requiredFiles) {
             if (-not (Test-Path -LiteralPath (Join-Path $rootPath $required) -PathType Leaf)) { throw 'API 环境不完整，请重新保存配置。' }
         }
-        $authState = Get-Content -LiteralPath (Join-Path $rootPath 'CodexHome\auth.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $authState = Read-ApiAuth (Join-Path $rootPath 'CodexHome\auth.json')
         $configState = Get-Content -LiteralPath (Join-Path $rootPath 'CodexHome\config.toml') -Raw -Encoding UTF8
-        if ($authState.auth_mode -ne 'apikey' -or $authState.OPENAI_API_KEY -ne 'CODEX_DUAL_ENV_KEY' -or
-            $configState -notmatch '(?m)^forced_login_method\s*=\s*"api"\s*$' -or
-            $configState -notmatch '(?m)^cli_auth_credentials_store\s*=\s*"file"\s*$') {
+        $document=New-Object CodexDual.TomlConfig($configState)
+        $authMode=if($authState.PSObject.Properties['auth_mode']){[string]$authState.auth_mode}else{''}
+        $authKey=if($authState.PSObject.Properties['OPENAI_API_KEY']){[string]$authState.OPENAI_API_KEY}else{''}
+        if (($authMode -and $authMode -ne 'apikey') -or -not $authKey -or
+            $document.GetString('forced_login_method') -ne 'api' -or
+            $document.GetString('cli_auth_credentials_store') -ne 'file') {
             throw 'API 登录模式设置缺失或被修改，已停止启动。请检查配置或使用新的空目录重新设置。'
         }
+        if($ccs){
+            $meta=Get-Content -LiteralPath (Join-Path $rootPath '.codex-dual.json') -Raw -Encoding UTF8|ConvertFrom-Json
+            $settingsPath=Get-FullDirectory $meta.ccsSettingsPath;Assert-NoReparsePoint $settingsPath
+            $settings=Get-Content -LiteralPath $settingsPath -Raw -Encoding UTF8|ConvertFrom-Json
+            if(-not $settings.PSObject.Properties['codexConfigDir'] -or -not (Get-FullDirectory $settings.codexConfigDir).Equals((Join-Path $rootPath 'CodexHome'),[StringComparison]::OrdinalIgnoreCase)){throw 'CCS 的 Codex 目录已变化，请检查接入设置。'}
+            if($authKey -eq 'CODEX_DUAL_ENV_KEY' -or $document.GetString('model_provider') -eq 'dual-api'){throw '请先在 CCS 中选择并应用 API 供应商，再启动此环境。'}
+        }else{
+        if($authMode -ne 'apikey' -or $authKey -ne 'CODEX_DUAL_ENV_KEY'){throw 'API 认证已由其他工具修改，请通过控制面板检查管理方式。'}
         $secure = Get-Content -LiteralPath (Join-Path $rootPath 'Credentials\api-key.dpapi') -Raw -Encoding UTF8 | ConvertTo-SecureString
         $pointer = [IntPtr]::Zero
         try {
@@ -202,6 +283,7 @@ function New-CodexStartInfo {
         } finally {
             if ($pointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
             $secure.Dispose()
+        }
         }
         $info.EnvironmentVariables['CODEX_HOME'] = Join-Path $rootPath 'CodexHome'
         $info.Arguments = '--user-data-dir="' + (Join-Path $rootPath 'DesktopProfile') + '"'
@@ -246,7 +328,7 @@ function Get-EnvironmentReport([string]$Root, [string]$OfficialHome, [string]$Ex
             } catch { $lines.Add('[问题] 无法解密密钥；请在当前 Windows 账户下重新填写并保存。') }
         }
         if (Test-Path -LiteralPath (Join-Path $rootPath 'CodexHome\auth.json')) {
-            $authState = Get-Content -LiteralPath (Join-Path $rootPath 'CodexHome\auth.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            $authState = Read-ApiAuth (Join-Path $rootPath 'CodexHome\auth.json')
             if ($authState.auth_mode -eq 'apikey' -and $authState.OPENAI_API_KEY -eq 'CODEX_DUAL_ENV_KEY') {
                 $lines.Add('[通过] API 模式标记存在；真实密钥通过子进程环境注入。')
             } else {

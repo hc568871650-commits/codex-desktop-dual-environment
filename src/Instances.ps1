@@ -5,8 +5,11 @@ if($env:PROCESSOR_ARCHITECTURE -ne 'AMD64'){throw '实例控制目前要求 x64 
 if (-not ('CodexDual.Native' -as [type])) { Add-Type -Path "$PSScriptRoot\Native.cs" }
 
 function Get-ObjectValue($Object, [string]$Name, $Default = $null) {
+    if($Object -is [System.Collections.IDictionary] -and $Object.Contains($Name)){return $Object[$Name]}
     if ($null -ne $Object -and $null -ne $Object.PSObject.Properties[$Name]) { return $Object.$Name }; return $Default
 }
+. "$PSScriptRoot\Preferences.ps1"
+. "$PSScriptRoot\ApiManagement.ps1"
 function Test-SamePath([string]$A,[string]$B) {
     if (-not $A -or -not $B) { return $false }
     try { return (Get-FullDirectory $A).Equals((Get-FullDirectory $B),[StringComparison]::OrdinalIgnoreCase) } catch { return $false }
@@ -156,6 +159,10 @@ function Start-OrFindInstance($Config,$Instance) {
         foreach($key in @('home','projects','projectless')){if($key -eq 'projectless' -and $Instance.role -eq 'official' -and -not $Instance.projectless -and (Get-ObjectValue $Instance 'projectlessMode' '') -eq 'inherit'){continue};if(-not (Test-Path -LiteralPath $Instance.$key -PathType Container)){throw "缺少目录：$key。请先完成部署。"}}
         if($Instance.profile -and -not (Test-Path -LiteralPath $Instance.profile -PathType Container)){throw 'Desktop profile 目录不存在。'}
         if($Instance.projectless -and -not (Test-SamePath (Get-ConfiguredProjectless $Instance.home) $Instance.projectless)){throw '实际无项目任务目录与控制器记录不符，请检查配置。'}
+        if($Instance.launchMode -eq 'managed-api' -and (Get-ApiManagementMode $Instance.apiRoot) -eq 'builtin'){
+            $profiles=Read-ApiProfiles $Config $Instance
+            if($profiles.pendingProfile){[void](Apply-ApiProfile $Config $Instance $profiles.pendingProfile.id -UsePending)}
+        }
         if($Instance.launchMode -eq 'external') {
             $launcher=Get-FullDirectory $Instance.externalLauncher;Assert-NoReparsePoint $launcher
             if(-not (Test-Path -LiteralPath $launcher -PathType Leaf)){throw '已有启动脚本不存在。'}
