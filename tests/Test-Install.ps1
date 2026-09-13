@@ -18,6 +18,11 @@ Check ($shortcut.Arguments.Contains($install) -and $shortcut.WorkingDirectory -e
 Check ($shortcut.IconLocation.StartsWith($install) -and -not $shortcut.IconLocation.Contains('WindowsApps')) 'Icon independent of versioned program path'
 & "$PSScriptRoot\..\scripts\Install.ps1" -InstallDirectory $install
 Check ((Get-FileHash -LiteralPath $configPath).Hash -eq $before) 'Repeated install preserves configuration'
+$repairLinks=Join-Path $root 'RepairLinks'
+& "$install\scripts\Repair-ControllerShortcut.ps1" -ShortcutDirectory $repairLinks
+& "$install\scripts\Repair-ControllerShortcut.ps1" -ShortcutDirectory $repairLinks
+$repaired=Join-Path $repairLinks 'Codex Dual Controller.lnk'
+Check ((Test-Path $repaired) -and @((Get-Content "$install\install-manifest.json" -Raw -Encoding UTF8|ConvertFrom-Json).shortcuts|Where-Object {$_.path -eq $repaired}).Count -eq 1) 'Manual entry repair is tracked and idempotent'
 $sentinel=Join-Path $data 'keep-user-data.txt';[IO.File]::WriteAllText($sentinel,'keep')
 $keyHash=(Get-FileHash -LiteralPath "$data\API\Credentials\api-key.dpapi").Hash
 & "$install\scripts\Uninstall.ps1"
@@ -27,4 +32,5 @@ Check (Test-Path -LiteralPath "$official\config.toml") 'Uninstall preserves offi
 Check (-not (Test-Path -LiteralPath "$install\src\Controller.ps1")) 'Uninstall removes controller executable script'
 Check (Test-Path -LiteralPath $moved) 'Moved shortcut deliberately retained for manual removal'
 Check (Test-Path -LiteralPath $configPath) 'Recovery configuration retained'
-Write-Output 'PASSED: 11 deployment checks'
+Check (-not (Test-Path $repaired)) 'Uninstall removes repaired owned shortcut'
+Write-Output 'PASSED: 13 deployment checks'

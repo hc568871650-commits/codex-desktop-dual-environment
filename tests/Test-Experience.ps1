@@ -49,11 +49,14 @@ try{
     Set-ControllerAutoStart $tool $configPath $true $registry
     Check (Test-ControllerAutoStart $tool $configPath $registry) 'Enable and read startup registration in isolated test key'
     $command=Get-ControllerStartupCommand $tool $configPath
-    Check ($command.Contains('" --background --config "') -and $command.EndsWith('instances.local.json"')) 'Startup quotes paths and opens only background controller'
+    Check ($command.Contains('" --config "') -and -not $command.Contains('--background') -and $command.EndsWith('instances.local.json"')) 'Startup quotes paths and opens the control panel'
+    $startupName=Get-ControllerStartupName $configPath
+    [void](New-ItemProperty -LiteralPath $registry -Name $startupName -Value (Get-LegacyControllerStartupCommand $tool $configPath) -PropertyType String -Force)
+    Check (Repair-ControllerAutoStart $tool $configPath $registry) 'Legacy background startup registration migrated'
+    Check ([string](Get-ItemProperty -LiteralPath $registry).$startupName -eq $command) 'Migrated startup opens the control panel'
     Set-ControllerAutoStart $tool $configPath $true $registry
     Set-ControllerAutoStart $tool $configPath $false $registry
     Check (-not (Test-ControllerAutoStart $tool $configPath $registry)) 'Disable removes exact owned entry'
-    $startupName=Get-ControllerStartupName $configPath
     [void](New-ItemProperty -LiteralPath $registry -Name $startupName -Value 'changed-by-user' -PropertyType String -Force)
     MustThrow {Set-ControllerAutoStart $tool $configPath $false $registry} 'Modified startup entry preserved'
 }finally{if(Test-Path -LiteralPath $registry){Remove-Item -LiteralPath $registry -Force}}

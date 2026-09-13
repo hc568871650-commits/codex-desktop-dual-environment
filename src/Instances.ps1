@@ -72,9 +72,18 @@ function Get-ProcessSnapshot {
         [pscustomobject]@{Id=[int]$_.ProcessId;ParentId=[int]$_.ParentProcessId;Name=$_.Name;Path=$_.ExecutablePath;Command=$_.CommandLine;Started=if($_.CreationDate){$_.CreationDate.ToUniversalTime().Ticks.ToString()}else{''}}
     })
 }
+function Get-ProcessSnapshotById([int]$ProcessId) {
+    @(Get-CimInstance Win32_Process -Filter ('ProcessId = '+$ProcessId) -ErrorAction Stop | ForEach-Object {
+        [pscustomobject]@{Id=[int]$_.ProcessId;ParentId=[int]$_.ParentProcessId;Name=$_.Name;Path=$_.ExecutablePath;Command=$_.CommandLine;Started=if($_.CreationDate){$_.CreationDate.ToUniversalTime().Ticks.ToString()}else{''}}
+    })
+}
 function Test-ProcessIdentity($Expected,$Actual) {
     return $null -ne $Actual -and $Expected.Id -eq $Actual.Id -and $Expected.Started -eq $Actual.Started -and
         (Test-SamePath $Expected.Path $Actual.Path) -and $Expected.Command -ceq $Actual.Command
+}
+function Test-ExpectedProcessAlive($Expected) {
+    $actual=@(Get-ProcessSnapshotById $Expected.Id)
+    return $actual.Count -eq 1 -and (Test-ProcessIdentity $Expected $actual[0])
 }
 function Resolve-Instance($Instance,$Snapshot,[string]$Executable,[scriptblock]$HomeReader = {param($n) [CodexDual.Native]::CodexHome($n)}) {
     $matches=@();$uncertain=@()
@@ -127,7 +136,7 @@ function Get-InstanceStatus($Config,$Instance) {
     return $states[0]
 }
 function Assert-CurrentIdentity($Instance,$Expected) {
-    $actual=@(Get-ProcessSnapshot | Where-Object {$_.Id -eq $Expected.Id})
+    $actual=@(Get-ProcessSnapshotById $Expected.Id)
     if($actual.Count -ne 1 -or -not (Test-ProcessIdentity $Expected $actual[0])){throw '目标已退出或进程身份变化，请刷新状态。'}
     $resolved=Resolve-Instance $Instance $actual $Expected.Path
     if($resolved.State -ne 'Running'){throw '进程环境归属验证失败。'}
@@ -222,8 +231,8 @@ function Request-InstanceClose($Instance,$Process) {
     Assert-NotCurrentHost $Process
     [void](Assert-CurrentIdentity $Instance $Process)
     foreach($window in @(Get-InstanceWindows $Instance $Process)) {
-        [void](Assert-CurrentIdentity $Instance $Process)
-        [CodexDual.Native]::Close($window.Handle,$Process.Id)
+        if(-not (Test-ExpectedProcessAlive $Process)){return}
+        try{[void](Assert-CurrentIdentity $Instance $Process);[CodexDual.Native]::Close($window.Handle,$Process.Id)}catch{if(-not (Test-ExpectedProcessAlive $Process)){return};throw}
     }
 }
 function Get-OwnedDesktopChildren($Process,$Snapshot) {
@@ -236,7 +245,7 @@ function Get-OwnedDesktopChildren($Process,$Snapshot) {
     return $owned
 }
 function Stop-VerifiedProcess($Expected) {
-    $actual=@(Get-ProcessSnapshot | Where-Object {$_.Id -eq $Expected.Id})
+    $actual=@(Get-ProcessSnapshotById $Expected.Id)
     if($actual.Count -eq 0){return}
     if($actual.Count -ne 1 -or -not (Test-ProcessIdentity $Expected $actual[0])){throw '强制退出前进程身份已变化，已中止。'}
     # Hold a process handle, then verify its start time again: PID reuse cannot redirect Kill().

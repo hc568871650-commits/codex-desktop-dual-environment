@@ -1,6 +1,7 @@
 ﻿param([Parameter(Mandatory=$true)][string]$FullArchive,[Parameter(Mandatory=$true)][string]$UpgradeArchive,[Parameter(Mandatory=$true)][string]$BaselineArchive)
 $ErrorActionPreference='Stop'
 $source=[IO.Path]::GetFullPath("$PSScriptRoot\..")
+$expectedVersion=(Get-Content -LiteralPath (Join-Path $source 'version.json') -Raw -Encoding UTF8|ConvertFrom-Json).version
 $root=Join-Path $source ('test-results\packages-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($root)
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -38,14 +39,16 @@ $driver=Join-Path $root 'upgrade-driver.ps1'
 $driverText=@'
 param([string]$Upgrade,[string]$Target,[string]$ReportPath)
 $ErrorActionPreference='Stop'
-. "$Upgrade\src\Upgrade.ps1"
-$upgradeResult=Invoke-ControllerUpgrade -Source $Upgrade -Target $Target
-$upgradeResult|ConvertTo-Json|Set-Content -LiteralPath $ReportPath -Encoding UTF8
+$registry='HKCU:\Software\CodexDualController.PackageTests.'+[Guid]::NewGuid().ToString('N')
+try{
+    $upgradeResult=@(& "$Upgrade\scripts\Bootstrap.ps1" -SearchDirectories @($Target) -NoShortcuts -NoLaunch -NonInteractive -RegistryPath $registry)[-1]
+    $upgradeResult|ConvertTo-Json|Set-Content -LiteralPath $ReportPath -Encoding UTF8
+}finally{if(Test-Path -LiteralPath $registry){Remove-Item -LiteralPath $registry -Force}}
 '@
 [IO.File]::WriteAllText($driver,$driverText,(New-Object Text.UTF8Encoding($true)))
 $resultPath=Join-Path $root 'upgrade-result.json'
 & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $driver -Upgrade $upgrade -Target $install -ReportPath $resultPath
-Check ($LASTEXITCODE -eq 0 -and (Get-Content "$install\version.json" -Raw|ConvertFrom-Json).version -eq '0.3.0') 'Actual upgrade ZIP upgrades installed 0.2.0 to 0.3.0'
+Check ($LASTEXITCODE -eq 0 -and (Get-Content $resultPath -Raw|ConvertFrom-Json).Mode -eq 'Upgrade' -and (Get-Content "$install\version.json" -Raw|ConvertFrom-Json).version -eq $expectedVersion) 'Actual upgrade ZIP automatically discovers and upgrades installed 0.2.0'
 foreach($path in $protected){Check ((Get-FileHash -LiteralPath $path).Hash -eq $hashes[$path]) ('Packaged upgrade preserves '+[IO.Path]::GetFileName($path))}
 Check (Test-Path -LiteralPath "$install\src\TomlConfig.cs") 'Packaged upgrade includes new runtime source'
 & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$install\src\Controller.ps1" -ConfigPath "$install\instances.local.json" -Action panel -SmokeTest -ScreenshotPath "$root\upgraded-panel.png"
@@ -56,9 +59,26 @@ $freshText=@'
 param([string]$Source,[string]$Install,[string]$Data,[string]$Official)
 $ErrorActionPreference='Stop'
 $key=ConvertTo-SecureString 'fixture-fresh-key' -AsPlainText -Force
-& "$Source\scripts\Install.ps1" -InstallDirectory $Install -DataDirectory $Data -OfficialHome $Official -Executable "$env:SystemRoot\System32\notepad.exe" -BaseUrl 'https://example.com/v1' -Model 'fixture-model' -ApiKey $key -NoShortcuts
+$registry='HKCU:\Software\CodexDualController.PackageTests.'+[Guid]::NewGuid().ToString('N')
+try{
+    & "$Source\scripts\Bootstrap.ps1" -TargetDirectory $Install -DataDirectory $Data -OfficialHome $Official -Executable "$env:SystemRoot\System32\notepad.exe" -BaseUrl 'https://example.com/v1' -Model 'fixture-model' -ApiKey $key -NoShortcuts -NoLaunch -NonInteractive -RegistryPath $registry
+}finally{if(Test-Path -LiteralPath $registry){Remove-Item -LiteralPath $registry -Force}}
 '@
 [IO.File]::WriteAllText($freshDriver,$freshText,(New-Object Text.UTF8Encoding($true)))
 & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $freshDriver -Source $full -Install $freshInstall -Data $freshData -Official $freshOfficial
 Check ($LASTEXITCODE -eq 0 -and (Test-Path "$freshInstall\CodexDualController.exe")) 'Full ZIP installs and compiles without repository dependencies'
+foreach($entry in @(@{Source=$full;Name='Start.cmd'},@{Source=$upgrade;Name='Install.cmd'})){
+    $info=New-Object Diagnostics.ProcessStartInfo
+    $info.FileName=$env:ComSpec
+    $info.Arguments='/d /c ""'+(Join-Path $entry.Source $entry.Name)+'" -TargetDirectory "'+$freshInstall+'" -NoShortcuts -CheckOnly"'
+    $info.UseShellExecute=$false;$info.CreateNoWindow=$true
+    $info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true;$info.RedirectStandardInput=$true
+    $info.EnvironmentVariables['PSModulePath']=Join-Path $root 'NonexistentModules'
+    $child=[Diagnostics.Process]::Start($info)
+    try{
+        $child.StandardInput.Close();$stdout=$child.StandardOutput.ReadToEnd();$stderr=$child.StandardError.ReadToEnd();$child.WaitForExit()
+        if($child.ExitCode -ne 0 -or -not $stdout.Contains('Launch')){throw ('Packaged entry failed: '+$stdout+$stderr)}
+        Check $true ('Packaged '+$entry.Name+' recognizes an intact installation with a hostile inherited module path')
+    }finally{$child.Dispose()}
+}
 Write-Output "PASSED: $script:passed package checks. Output: $root"

@@ -10,7 +10,7 @@ $config=Read-ControllerConfig $ConfigPath
 $root=Get-FullDirectory $Destination;Assert-NoReparsePoint $root
 if((Test-Path -LiteralPath $root) -and @(Get-ChildItem -LiteralPath $root -Force).Count){throw '部署目标必须为空，现有文件不会覆盖。'}
 foreach($instance in $config.instances){foreach($key in @('home','profile','projects','projectless')){if($instance.$key -and (Test-PathOverlap $root $instance.$key)){throw '工具目录必须与用户数据目录分离。'}}}
-if(-not $ShortcutDirectory){$ShortcutDirectory=$root}
+if(-not $ShortcutDirectory){$ShortcutDirectory=[Environment]::GetFolderPath('Desktop')}
 $ShortcutDirectory=Get-FullDirectory $ShortcutDirectory;Assert-NoReparsePoint $ShortcutDirectory
 $shortcutPath=Join-Path $ShortcutDirectory 'Codex Dual Controller.lnk'
 if(Test-Path -LiteralPath $shortcutPath){throw '同名快捷方式已存在，保留原文件。'}

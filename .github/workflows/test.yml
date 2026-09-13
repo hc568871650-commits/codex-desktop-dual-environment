@@ -27,6 +27,11 @@ jobs:
       - name: Test compiled controller interactions
         shell: powershell
         run: ./tests/Test-Host.ps1
+      - name: Test automatic setup and exit responsiveness
+        shell: powershell
+        run: |
+          ./tests/Test-Setup.ps1
+          ./tests/Test-ExitUi.ps1
       - name: Package
         shell: powershell
         run: ./tests/Test-Upgrade.ps1

@@ -1,4 +1,5 @@
 ﻿# UI helpers share the controller runspace. Instance IDs remain the action targets.
+if(-not ('CodexDual.ExitWaitDialog' -as [type])){Add-Type -Path "$PSScriptRoot\ExitWaitDialog.cs" -ReferencedAssemblies System.Windows.Forms,System.Drawing}
 function New-UiLabel($Parent,[string]$Text,[int]$X,[int]$Y,[int]$Width,[int]$Height=26) {
     $label=New-Object Windows.Forms.Label;$label.Text=$Text;$label.UseMnemonic=$false;$label.SetBounds($X,$Y,$Width,$Height);$Parent.Controls.Add($label);return $label
 }
@@ -14,6 +15,23 @@ function Invoke-PanelAction([scriptblock]$Action) {
     $script:uiBusy=$true;$panel.UseWaitCursor=$true
     try{& $Action}catch{Set-UiMessage $_.Exception.Message;Show-Error $_}
     finally{$panel.UseWaitCursor=$false;$script:uiBusy=$false;Update-PanelStatus}
+}
+function Wait-ExpectedProcessExitUi($Expected,[string]$Message,[int]$TimeoutMilliseconds,[switch]$PassThru) {
+    $alreadyExited=New-Object CodexDual.ExitWaitResult;$alreadyExited.Exited=$true
+    if(-not (Test-ExpectedProcessAlive $Expected)){if($PassThru){return $alreadyExited};return $true}
+    $process=$null
+    try{
+        $process=[Diagnostics.Process]::GetProcessById($Expected.Id)
+        $handle=$process.Handle
+        if([Math]::Abs($process.StartTime.ToUniversalTime().Ticks - [long]$Expected.Started) -ge 10){$process.Dispose();if($PassThru){return $alreadyExited};return $true}
+    }catch [ArgumentException]{if($process){$process.Dispose()};if($PassThru){return $alreadyExited};return $true}
+    catch{if($process){$process.Dispose()};throw}
+    try{
+        $owner=[Windows.Forms.Form]::ActiveForm
+        if(-not $owner -and $panel -and $panel.Visible){$owner=$panel}
+        $result=[CodexDual.ExitWaitDialog]::Show($process,'正在退出',$Message,$TimeoutMilliseconds,$owner)
+        if($PassThru){return $result};return [bool]$result.Exited
+    }finally{$process.Dispose()}
 }
 function Update-PanelNames {
     $script:preferences=Read-ControllerPreferences $config
@@ -134,7 +152,7 @@ function Show-ApiManager {
         try{Apply-SelectedProfile $list.SelectedItem $false;$channelMessage.Text=$script:feedback.Text}catch{Show-Error $_}
     })
     [void](New-UiButton $channels '应用并重启 API' 420 328 186 {
-        try{Apply-SelectedProfile $list.SelectedItem $true;$channelMessage.Text=$script:feedback.Text}catch{Show-Error $_}
+        Invoke-PanelAction {Apply-SelectedProfile $list.SelectedItem $true;$channelMessage.Text=$script:feedback.Text}
     })
     [void](New-UiLabel $ccsPage 'CCS 管理此 API 环境的渠道与密钥，控制器管理双窗口。' 18 20 590 46)
     [void](New-UiLabel $ccsPage 'CC Switch 程序' 18 76 590);$ccsExe=New-UiTextBox $ccsPage 18 104 486

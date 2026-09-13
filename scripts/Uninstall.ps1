@@ -26,8 +26,11 @@ try {
     }
     # Remove only this installation's exact opt-in startup command.
     $configPath=Join-Path $root 'instances.local.json'
-    if(Test-ControllerAutoStart $root $configPath){Set-ControllerAutoStart $root $configPath $false}
+    $startupName=Get-ControllerStartupName $configPath
+    $startupValues=Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue
+    if($startupValues -and $startupValues.PSObject.Properties[$startupName] -and [string]$startupValues.$startupName -in @((Get-ControllerStartupCommand $root $configPath),(Get-LegacyControllerStartupCommand $root $configPath))){Set-ControllerAutoStart $root $configPath $false}
     foreach($path in $remove){Remove-Item -LiteralPath $path -Force}
+    Unregister-ControllerInstallation $root
     Write-Output '工具文件及原位置未修改的快捷方式已移除。两套用户数据、密钥、本机配置、运行记录及修改过的文件全部保留。'
     Write-Output '移动过的快捷方式请手动删除；不会搜索或删除收纳应用里的文件。'
     if($preserved.Count){Write-Output ('保留修改过的文件：'+$preserved.Count)}

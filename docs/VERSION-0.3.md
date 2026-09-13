@@ -44,7 +44,7 @@ CCS 的实验目录、专用启动脚本及非标准启动环境不能直接绑�
 
 ## 登录自启动
 
-面板开关默认关闭。开启后为当前配置登记 Windows 当前用户的登录启动项，登录时只让控制器驻留托盘，两个 Codex 窗口仍由用户手动打开。无需管理员权限。
+面板开关默认关闭。开启后为当前配置登记 Windows 当前用户的登录启动项，登录时直接显示控制面板，两个 Codex 窗口仍由用户手动打开。旧版“仅驻留托盘”的登记会在下次打开控制器时自动迁移。无需管理员权限。
 
 关闭开关时移除精确匹配的本工具登记；升级保留选择，卸载移除本安装登记。用户另行改写的同名启动项保留并提示检查。若 Windows 的“启动应用”界面另行禁用了此项，还需在系统设置中开启。
 
@@ -52,8 +52,8 @@ CCS 的实验目录、专用启动脚本及非标准启动环境不能直接绑�
 
 ## 安装和升级
 
-完整包：`CodexDualLauncher-0.3.0-windows.zip`。首次解压到固定目录，运行 `Install.cmd`。仍只依赖 Windows x64 自带的 PowerShell 5.1、.NET Framework 和已安装的 Codex Desktop。
+完整包：`CodexDualLauncher-0.3.1-windows.zip`。解压后运行 `Start.cmd` 或 `Install.cmd`，自动决定安装、升级、修复或直接打开。仍只依赖 Windows x64 自带的 PowerShell 5.1、.NET Framework 和已安装的 Codex Desktop。
 
-升级包：`CodexDualLauncher-0.x-to-0.3.0-upgrade.zip`。解压到新目录后运行 `Upgrade.cmd`，选择原工具目录；退出旧控制器即可，两套 Codex 可以保持运行。升级保留实例配置、名称、位置、渠道和数据。
+升级包：`CodexDualLauncher-0.x-to-0.3.1-upgrade.zip`。使用相同的统一入口；也保留 `Upgrade.cmd` 手动选择原工具目录。退出旧控制器即可，两套 Codex 可以保持运行。升级保留实例配置、名称、位置、渠道和数据。
 
 完成后从原位置打开控制器。完整步骤见 [UPGRADE.md](UPGRADE.md)。

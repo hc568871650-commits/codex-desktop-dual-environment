@@ -5,8 +5,9 @@ $output=Join-Path $root ('test-results\validation-'+[DateTime]::Now.ToString('yy
 [void][IO.Directory]::CreateDirectory($output)
 $checks=@(
     @{file='Test-Core.ps1';args=@()},@{file='Test-Instances.ps1';args=@('-Integration')},
-    @{file='Test-Install.ps1';args=@()},@{file='Test-Upgrade.ps1';args=@()},
-    @{file='Test-Experience.ps1';args=@()},@{file='Test-Controller.ps1';args=@()},@{file='Test-Host.ps1';args=@()}
+    @{file='Test-Install.ps1';args=@()},@{file='Test-Upgrade.ps1';args=@()},@{file='Test-Setup.ps1';args=@()},
+    @{file='Test-Experience.ps1';args=@()},@{file='Test-ExitUi.ps1';args=@()},
+    @{file='Test-Controller.ps1';args=@()},@{file='Test-Host.ps1';args=@()}
 )
 if($IncludeDesktop){$checks+=@(@{file='Test-Desktop.ps1';args=@('-RunIsolatedDesktop','-CleanupFixtures')})}
 $summary=@()

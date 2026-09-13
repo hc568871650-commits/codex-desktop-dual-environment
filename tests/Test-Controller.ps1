@@ -9,7 +9,7 @@ $path="$root\instances.local.json";Write-AtomicText $path ($config|ConvertTo-Jso
 $fake=ConvertTo-SecureString 'fixture-panel-key' -AsPlainText -Force
 try{[void](Save-ApiEnvironment $config.instances[1].apiRoot $config.instances[0].home 'https://example.com/v1' 'example-model' $fake)}finally{$fake.Dispose()}
 $controller=[IO.Path]::GetFullPath("$PSScriptRoot\..\src\Controller.ps1")
-& powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $controller -ConfigPath $path -SmokeTest -ScreenshotPath "$root\menu.png"
+& powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $controller -ConfigPath $path -Action tray -SmokeTest -ScreenshotPath "$root\menu.png"
 if($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath "$root\menu.png")){throw 'Tray smoke failed'}
 Write-Output 'PASS: actual tray menu renders and disposes without exiting Codex'
 & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $controller -ConfigPath $path -Action panel -SmokeTest -ScreenshotPath "$root\panel.png"

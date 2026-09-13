@@ -25,6 +25,10 @@ Assert ((Resolve-Instance $a @($p) 'C:\Other\Fixture.exe' $reader).State -eq 'St
 $reuse=$p.PSObject.Copy();$reuse.Started='2000'
 Assert (-not (Test-ProcessIdentity $p $reuse)) 'PID reuse rejected'
 Assert (-not (Test-ProcessIdentity $p $null)) 'Exited process rejected'
+$current=@(Get-ProcessSnapshotById $PID)
+Assert ($current.Count -eq 1 -and (Test-ExpectedProcessAlive $current[0])) 'Single-PID process liveness uses verified identity'
+$stale=$current[0].PSObject.Copy();$stale.Started='1'
+Assert (-not (Test-ExpectedProcessAlive $stale)) 'Single-PID liveness rejects stale identity'
 $child=[pscustomobject]@{Id=102;ParentId=100;Path=$exe;Command='"'+$exe+'" --type=renderer';Started='1002'}
 $server=[pscustomobject]@{Id=103;ParentId=100;Path='C:\External\node.exe';Command='node server.js';Started='1002'}
 $oldchild=$child.PSObject.Copy();$oldchild.Id=104;$oldchild.Started='900'

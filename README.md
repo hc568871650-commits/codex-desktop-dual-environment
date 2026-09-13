@@ -15,26 +15,26 @@
 
 日常可通过任务栏入口、小控制面板或托盘菜单分别打开、找回和退出两边；重复点击会定位已有实例。小控制面板是管理这两个 Desktop 的入口。
 
-**当前版本 0.3.0：** [新版功能与操作](docs/VERSION-0.3.md) · [快速开始](#快速开始) · [升级指南](docs/UPGRADE.md)
+**当前版本 0.3.1：** [自动安装与升级](docs/AUTO-SETUP.md) · [新版功能与操作](docs/VERSION-0.3.md) · [快速开始](#快速开始) · [升级指南](docs/UPGRADE.md)
 
-0.3 集中改善双开体验：托盘左键显示并保留小面板，记忆窗口位置；两个环境可以分别改名及恢复默认名称；API 卡片可保存、切换渠道，也可选择由 CC Switch 管理；自启动通过面板开关按需开启。API 运行期间选择新渠道只暂存，等下次启动时再成套应用地址、模型与密钥。
+0.3 集中改善双开体验：托盘左键显示并保留小面板，记忆窗口位置；两个环境可以分别改名及恢复默认名称；API 卡片可保存、切换渠道，也可选择由 CC Switch 管理；自启动通过面板开关按需开启，登录后直接显示控制面板。API 运行期间选择新渠道只暂存，等下次启动时再成套应用地址、模型与密钥。
 
 独立配置不等于文件访问沙箱：两边仍可访问当前 Windows 用户有权限的文件。并行修改代码请使用不同目录或 Git worktree；实际验证范围见[验证与边界](#验证与边界)。
 
 ## 从 0.1 / 0.2 升级
 
-将升级包解压到新目录后运行 **Upgrade.cmd**，选择原工具目录。不必重填密钥，原实例 ID、数据目录和本机设置保留。操作前仅退出启动器/控制器，Codex 可继续运行。也支持完整包覆盖解压；两种方式的回滚区别见[升级指南](docs/UPGRADE.md)。
+将新包解压到新目录后运行 **Start.cmd** 或 **Install.cmd**。入口自动识别原安装并备份升级，不必重填密钥；相同版本且文件完整时直接打开。多个候选目录时才要求选择；0.1 仅有旧设置而无法确定工具位置时，也会要求选择。控制器运行中会提示先退出它，Codex 可继续运行。`Upgrade.cmd` 保留为手动选择目录的入口；详情见[升级指南](docs/UPGRADE.md)。
 
 ## 快速开始
 
 要求：Windows x64、系统自带的 **64 位 Windows PowerShell 5.1 + .NET Framework / WinForms**、已安装的 Codex Desktop。无需 Node、Python 或额外 SDK。ARM64/32 位进程识别未支持；身份读取受限时停止操作。
 
-1. 完整解压工具到固定目录，双击 `Install.cmd`。
-2. 输入现有官方 `CODEX_HOME` 的绝对路径、API 地址、模型 ID 和密钥。密钥隐藏输入，使用当前 Windows 用户 DPAPI 加密。
+1. 完整解压工具到新目录，双击 `Start.cmd` 或 `Install.cmd`，两者使用相同的自动识别流程。
+2. 没有已有安装时，才输入官方 `CODEX_HOME` 的绝对路径、API 地址、模型 ID 和密钥；升级时复用原配置。密钥隐藏输入，使用当前 Windows 用户 DPAPI 加密。
 3. 默认工具装入 `%LOCALAPPDATA%\CodexDualController`，新 API 数据装入 `%LOCALAPPDATA%\CodexDualData\API`。官方数据保持原位，默认沿用原生 Desktop profile，不复制官方认证或历史。
 4. 使用生成的 **Codex Dual Controller**（控制面板）、**Codex Official**（官方版）、**Codex API**（API 版）快捷方式。安装过程不启动或关闭 Codex。
 5. 打开小面板，点击所需环境的“打开”。可右键安装目录的 `CodexDualController.exe` 选择“固定到任务栏”。托盘左键及任务栏入口都找回原面板，右键显示菜单；关闭面板收起到托盘。已运行时定位已有窗口；多个主窗口时选择；未运行时才启动。
-6. 点击“改名”区分用途；“管理 API”进入渠道、CCS 接入及备份恢复。需要自启动时勾选“登录 Windows 时启动控制器”，默认关闭，开启后登录时仅驻留托盘。
+6. 点击“改名”区分用途；“管理 API”进入渠道、CCS 接入及备份恢复。需要自启动时勾选“登录时自动打开控制面板”，默认关闭；控制器未运行时可双击桌面的 `Codex Dual Controller.lnk`。
 
 已有官方 `config.toml` 必须具有可解析的 `[desktop] projectlessWorkspaceRoot`；安装器读取该设置并保留它，缺失时提示手动设置，不静默改写原配置。没有任何数据的全新官方目录才会生成最小配置。
 
@@ -47,8 +47,8 @@
 可指定部署位置、官方 profile、安装目录或桌面程序路径：
 
 ```powershell
-powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts\Install.ps1 `
-  -InstallDirectory 'C:\CodexDual\Tool' -DataDirectory 'C:\CodexDual\Data' `
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts\Bootstrap.ps1 `
+  -TargetDirectory 'C:\CodexDual\Tool' -DataDirectory 'C:\CodexDual\Data' `
   -OfficialHome 'C:\MyCodexHome' -Executable 'C:\InstalledCodex'
 ```
 

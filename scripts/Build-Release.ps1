@@ -1,7 +1,10 @@
-﻿param([string]$Version = '0.3.0')
+﻿param([string]$Version)
 $ErrorActionPreference = 'Stop'
-if ($Version -notmatch '^\d+\.\d+\.\d+(-[A-Za-z0-9.]+)?$') { throw 'Invalid version.' }
 $repository = Split-Path $PSScriptRoot -Parent
+$sourceVersion=(Get-Content -LiteralPath (Join-Path $repository 'version.json') -Raw -Encoding UTF8|ConvertFrom-Json).version
+if(-not $Version){$Version=$sourceVersion}
+if($Version -ne $sourceVersion){throw 'Archive version must match version.json.'}
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid version.' }
 $outputDirectory = Join-Path $repository 'dist'
 [void][IO.Directory]::CreateDirectory($outputDirectory)
 $archive = Join-Path $outputDirectory "CodexDualLauncher-$Version-windows.zip"

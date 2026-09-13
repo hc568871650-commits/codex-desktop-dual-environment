@@ -1,9 +1,10 @@
 ﻿param(
     [string]$ConfigPath = '',
-    [ValidateSet('tray','panel','configure','official','api','status')][string]$Action = 'tray',
+    [ValidateSet('tray','panel','configure','official','api','status')][string]$Action = 'panel',
     [switch]$SmokeTest,
     [ValidateSet('main','api')][string]$Preview='main',
-    [string]$ScreenshotPath
+    [string]$ScreenshotPath,
+    [Action[string]]$LifecycleObserver
 )
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
@@ -51,15 +52,10 @@ try {
             if($answer -ne 'Yes'){return}
             $before=Get-ProcessSnapshot;$owned=@(Get-OwnedDesktopChildren $process $before)
             Request-InstanceClose $instance $process
-            $alive=$true
-            for($i=0;$i -lt 20;$i++) {
-                Start-Sleep -Milliseconds 400
-                $alive=@(Get-ProcessSnapshot | Where-Object {Test-ProcessIdentity $process $_}).Count -gt 0
-                if(-not $alive){break}
-            }
+            $alive=-not (Wait-ExpectedProcessExitUi -Expected $process -Message ('正在退出 '+$label+'…') -TimeoutMilliseconds 3000)
             if($alive) {
                 $answer=[Windows.Forms.MessageBox]::Show("$label 仍在后台运行。是否强制结束已核验的桌面进程？可能中断任务和丢失未保存内容。不会结束任务启动的服务器、编辑器或无法确认归属的进程。",'正常退出未完成','YesNo','Warning','Button2')
-                if($answer -eq 'Yes'){ $owned=@(Stop-InstanceForced $instance $process -UserConfirmed);Start-Sleep -Milliseconds 500 }
+                if($answer -eq 'Yes'){$owned=@(Stop-InstanceForced $instance $process -UserConfirmed);[void](Wait-ExpectedProcessExitUi -Expected $process -Message ('正在强制结束 '+$label+'…') -TimeoutMilliseconds 2000)}
             }
             $residual=@(Get-ExitResiduals $before $owned)
             if($residual.Count){$text=($residual | ForEach-Object {"PID $($_.Id) / $($_.Name) / "+$(if($_.VerifiedDesktop){'桌面进程仍驻留'}else{'归属/用途未充分确认，保留'})}) -join "`r`n"}
@@ -99,24 +95,25 @@ try {
         foreach($role in @('official','api')){
             $entry=$menu.Items.Add($(if($role -eq 'official'){'启动或显示官方版'}else{'启动或显示 API 版'}));$entry.Tag=$role
             $script:openMenus[$role]=$entry
-            $entry.Add_Click({param($sender,$eventArgs) try{$sender.Owner.Close();[Windows.Forms.Application]::DoEvents();Open-Instance @($config.instances | Where-Object {$_.role -eq $sender.Tag})[0]}catch{Show-Error $_}})
+            $entry.Add_Click({param($sender,$eventArgs) $sender.Owner.Close();[Windows.Forms.Application]::DoEvents();$target=$sender.Tag;Invoke-PanelAction {Open-Instance @($config.instances | Where-Object {$_.role -eq $target})[0]}})
         }
         [void]$menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))
         foreach($role in @('official','api')){
             $entry=$menu.Items.Add($(if($role -eq 'official'){'退出官方版…'}else{'退出 API 版…'}));$entry.Tag=$role
             $script:closeMenus[$role]=$entry
-            $entry.Add_Click({param($sender,$eventArgs) try{Close-Instance @($config.instances | Where-Object {$_.role -eq $sender.Tag})[0]}catch{Show-Error $_}})
+            $entry.Add_Click({param($sender,$eventArgs) $sender.Owner.Close();$target=$sender.Tag;Invoke-PanelAction {Close-Instance @($config.instances | Where-Object {$_.role -eq $target})[0]}})
         }
         [void]$menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))
         $exitItem=$menu.Items.Add('退出控制器');$exitItem.Add_Click({$script:quittingController=$true;$context.ExitThread()})
-        $menu.Add_Opening({
+        $menu.Add_Opening({param($sender,$e)
+            if($script:uiBusy){$e.Cancel=$true;return}
             foreach($instance in $config.instances){$prefix=(Get-InstanceDisplayName $instance (Read-ControllerPreferences $config)).Replace('&','&&')
                 try{$s=Get-InstanceStatus $config $instance;$labels[$instance.role].Text=$prefix+'：'+$s.Reason}
                 catch{$labels[$instance.role].Text=$prefix+'：状态未知';$labels[$instance.role].ToolTipText=$_.Exception.Message}
             }
         })
         $tray.ContextMenuStrip=$menu;$tray.Visible=$true
-        $tray.Add_MouseClick({param($sender,$eventArgs) if($eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left){Show-ControlPanel}})
+        $tray.Add_MouseClick({param($sender,$eventArgs) if(-not $script:uiBusy -and $eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left){Show-ControlPanel}})
         $panel=New-Object Windows.Forms.Form
         $panel.Text=$controllerLabel+' · 0.3';$panel.ClientSize=New-Object Drawing.Size(520,366)
         $panel.FormBorderStyle='FixedSingle';$panel.MaximizeBox=$false;$panel.StartPosition='Manual'
@@ -138,11 +135,11 @@ try {
         $script:applyButton=New-UiButton $panel '应用渠道' 254 223 112 {Invoke-PanelAction {Apply-SelectedProfile $script:profilePicker.SelectedItem $false}}
         [void](New-UiButton $panel '管理 API' 376 223 124 {Show-ApiManager})
         $script:feedback=New-UiLabel $panel '关闭面板收起到托盘；窗口位置会记住。' 20 267 480 43
-        $startup=New-Object Windows.Forms.CheckBox;$startup.Text='登录 Windows 时启动控制器';$startup.SetBounds(20,317,272,28);$panel.Controls.Add($startup)
+        $startup=New-Object Windows.Forms.CheckBox;$startup.Text='登录时自动打开控制面板';$startup.SetBounds(20,317,272,28);$panel.Controls.Add($startup)
         $toolRoot=Split-Path $PSScriptRoot -Parent
-        $startup.Checked=[bool](Test-ControllerAutoStart $toolRoot $ConfigPath)
+        $startup.Checked=[bool](Repair-ControllerAutoStart $toolRoot $ConfigPath)
         $startup.Add_Click({
-            try{Set-ControllerAutoStart $toolRoot $ConfigPath $startup.Checked;Set-UiMessage $(if($startup.Checked){'已开启：登录后控制器驻留托盘，Codex 由你手动打开。'}else{'已关闭控制器自启动。'})}
+            try{Set-ControllerAutoStart $toolRoot $ConfigPath $startup.Checked;Set-UiMessage $(if($startup.Checked){'已开启：登录后自动打开控制面板，Codex 仍由你手动打开。'}else{'已关闭控制器自启动。'})}
             catch{$startup.Checked=[bool](Test-ControllerAutoStart $toolRoot $ConfigPath);Show-Error $_}
         })
         [void](New-UiButton $panel '检查环境' 300 315 96 {Show-ControllerDiagnostics})
@@ -187,6 +184,6 @@ try {
             if($ScreenshotPath){$bmp=New-Object Drawing.Bitmap($menu.Width,$menu.Height);try{$menu.DrawToBitmap($bmp,(New-Object Drawing.Rectangle(0,0,$menu.Width,$menu.Height)));$bmp.Save($ScreenshotPath)}finally{$bmp.Dispose()}}
             $menu.Close()
             }
-        }else{if($Action -in @('panel','configure')){Show-ControlPanel};if($Action -eq 'configure'){Show-ApiManager};[Windows.Forms.Application]::Run($context)}
+        }else{if($Action -in @('panel','configure')){Show-ControlPanel};if($LifecycleObserver){$LifecycleObserver.Invoke('ready-'+$Action)};if($Action -eq 'configure'){Show-ApiManager};[Windows.Forms.Application]::Run($context)}
     }finally{if($panelTimer){$panelTimer.Stop();$panelTimer.Dispose()};if($panelEvent){$panelEvent.Dispose()};if($configureEvent){$configureEvent.Dispose()};if($panel){$panel.Dispose()};if($tray){$tray.Visible=$false;$tray.Dispose()};if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
-}catch{if($Action -eq 'status' -or $SmokeTest){throw};Show-Error $_;exit 1}
+}catch{if($LifecycleObserver){$LifecycleObserver.Invoke('failed-'+$_.Exception.GetType().FullName)};if($Action -eq 'status' -or $SmokeTest){throw};Show-Error $_;exit 1}

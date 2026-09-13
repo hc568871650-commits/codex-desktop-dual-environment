@@ -47,7 +47,21 @@ function Get-ControllerStartupName([string]$ConfigPath) {
     $hash=[Security.Cryptography.SHA256]::Create()
     try{return 'CodexDualController.'+[BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes((Get-FullDirectory $ConfigPath).ToLowerInvariant()))).Replace('-','').Substring(0,16)}finally{$hash.Dispose()}
 }
+function Register-ControllerInstallation([string]$ToolRoot,[string]$RegistryPath='HKCU:\Software\CodexDualController\Installations') {
+    $root=Get-FullDirectory $ToolRoot
+    $name=Get-ControllerStartupName (Join-Path $root 'instances.local.json')
+    if(-not (Test-Path -LiteralPath $RegistryPath)){[void](New-Item -Path $RegistryPath -Force)}
+    [void](New-ItemProperty -LiteralPath $RegistryPath -Name $name -Value $root -PropertyType String -Force)
+}
+function Unregister-ControllerInstallation([string]$ToolRoot,[string]$RegistryPath='HKCU:\Software\CodexDualController\Installations') {
+    $name=Get-ControllerStartupName (Join-Path $ToolRoot 'instances.local.json')
+    $values=Get-ItemProperty -LiteralPath $RegistryPath -ErrorAction SilentlyContinue
+    if($values -and $values.PSObject.Properties[$name] -and (Test-SamePath ([string]$values.$name) $ToolRoot)){Remove-ItemProperty -LiteralPath $RegistryPath -Name $name}
+}
 function Get-ControllerStartupCommand([string]$ToolRoot,[string]$ConfigPath) {
+    return '"'+(Join-Path (Get-FullDirectory $ToolRoot) 'CodexDualController.exe')+'" --config "'+(Get-FullDirectory $ConfigPath)+'"'
+}
+function Get-LegacyControllerStartupCommand([string]$ToolRoot,[string]$ConfigPath) {
     return '"'+(Join-Path (Get-FullDirectory $ToolRoot) 'CodexDualController.exe')+'" --background --config "'+(Get-FullDirectory $ConfigPath)+'"'
 }
 function Test-ControllerAutoStart([string]$ToolRoot,[string]$ConfigPath,[string]$RegistryPath='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run') {
@@ -58,11 +72,20 @@ function Test-ControllerAutoStart([string]$ToolRoot,[string]$ConfigPath,[string]
 function Set-ControllerAutoStart([string]$ToolRoot,[string]$ConfigPath,[bool]$Enabled,[string]$RegistryPath='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run') {
     $name=Get-ControllerStartupName $ConfigPath;$command=Get-ControllerStartupCommand $ToolRoot $ConfigPath
     $values=Get-ItemProperty -LiteralPath $RegistryPath -ErrorAction SilentlyContinue
-    if($values -and $values.PSObject.Properties[$name] -and [string]$values.$name -ne $command){throw '同名自启动项已被其他入口修改，保留现有项，请先检查 Windows 启动设置。'}
+    $legacy=Get-LegacyControllerStartupCommand $ToolRoot $ConfigPath
+    if($values -and $values.PSObject.Properties[$name] -and [string]$values.$name -notin @($command,$legacy)){throw '同名自启动项已被其他入口修改，保留现有项，请先检查 Windows 启动设置。'}
     if($Enabled){
         $hostPath=Join-Path $ToolRoot 'CodexDualController.exe';Assert-NoReparsePoint $hostPath
         if(-not (Test-Path -LiteralPath $hostPath -PathType Leaf)){throw '控制器 EXE 尚未生成，请先完成安装或升级。'}
         if(-not (Test-Path -LiteralPath $RegistryPath)){[void](New-Item -Path $RegistryPath -Force)}
         [void](New-ItemProperty -LiteralPath $RegistryPath -Name $name -Value $command -PropertyType String -Force)
     }elseif($values -and $values.PSObject.Properties[$name]){Remove-ItemProperty -LiteralPath $RegistryPath -Name $name}
+}
+function Repair-ControllerAutoStart([string]$ToolRoot,[string]$ConfigPath,[string]$RegistryPath='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run') {
+    $name=Get-ControllerStartupName $ConfigPath
+    $values=Get-ItemProperty -LiteralPath $RegistryPath -ErrorAction SilentlyContinue
+    if($values -and $values.PSObject.Properties[$name] -and [string]$values.$name -eq (Get-LegacyControllerStartupCommand $ToolRoot $ConfigPath)){
+        Set-ControllerAutoStart $ToolRoot $ConfigPath $true $RegistryPath
+    }
+    return Test-ControllerAutoStart $ToolRoot $ConfigPath $RegistryPath
 }
