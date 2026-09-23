@@ -25,7 +25,14 @@ $repaired=Join-Path $repairLinks 'Codex Dual Controller.lnk'
 Check ((Test-Path $repaired) -and @((Get-Content "$install\install-manifest.json" -Raw -Encoding UTF8|ConvertFrom-Json).shortcuts|Where-Object {$_.path -eq $repaired}).Count -eq 1) 'Manual entry repair is tracked and idempotent'
 $sentinel=Join-Path $data 'keep-user-data.txt';[IO.File]::WriteAllText($sentinel,'keep')
 $keyHash=(Get-FileHash -LiteralPath "$data\API\Credentials\api-key.dpapi").Hash
-& "$install\scripts\Uninstall.ps1"
+# Run the uninstaller copy with a fixture-only mutex, preserving the production
+# script and its manifest hash while a daily controller may still be running.
+$isolatedUninstall=Join-Path $install 'scripts\Uninstall.IsolatedTest.ps1'
+$uninstallText=[IO.File]::ReadAllText((Join-Path $install 'scripts\Uninstall.ps1'))
+if(-not $uninstallText.Contains("'Local\CodexDual.Controller.'")){throw 'Uninstaller mutex test seam missing'}
+$uninstallText=$uninstallText.Replace("'Local\CodexDual.Controller.'",("'Local\CodexDual.InstallTest."+[Guid]::NewGuid().ToString('N')+".'"))
+[IO.File]::WriteAllText($isolatedUninstall,$uninstallText,(New-Object Text.UTF8Encoding($true)))
+try{& $isolatedUninstall -InstallDirectory $install}finally{if(Test-Path -LiteralPath $isolatedUninstall){Remove-Item -LiteralPath $isolatedUninstall}}
 Check (Test-Path -LiteralPath $sentinel) 'Uninstall preserves user data'
 Check ((Get-FileHash -LiteralPath "$data\API\Credentials\api-key.dpapi").Hash -eq $keyHash) 'Uninstall preserves encrypted credential'
 Check (Test-Path -LiteralPath "$official\config.toml") 'Uninstall preserves official configuration'

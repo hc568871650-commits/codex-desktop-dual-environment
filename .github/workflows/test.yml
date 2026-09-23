@@ -23,7 +23,10 @@ jobs:
         run: ./tests/Test-Controller.ps1
       - name: Test 0.3 experience and configuration isolation
         shell: powershell
-        run: ./tests/Test-Experience.ps1
+        run: |
+          ./tests/Test-Experience.ps1
+          ./tests/Test-DailyActions.ps1
+          ./tests/Test-Diagnostics.ps1
       - name: Test compiled controller interactions
         shell: powershell
         run: ./tests/Test-Host.ps1

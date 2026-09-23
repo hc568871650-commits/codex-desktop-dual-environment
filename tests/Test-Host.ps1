@@ -2,8 +2,6 @@
 . "$PSScriptRoot\..\src\Instances.ps1"
 Add-Type -Path "$PSScriptRoot\HostAutomation.cs"
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$guard=New-Object Threading.Mutex($false,('Local\CodexDual.Controller.'+$sid));$held=$false
-try{try{$held=$guard.WaitOne(0)}catch [Threading.AbandonedMutexException]{$held=$true};if(-not $held){throw '请在没有日常控制器运行的独立测试会话中运行 Test-Host。不会关闭现有控制器。'}}finally{if($held){$guard.ReleaseMutex()};$guard.Dispose()}
 $root=Join-Path ([IO.Path]::GetFullPath("$PSScriptRoot\..\test-results")) ('host-'+[Guid]::NewGuid().ToString('N')+' space 中文')
 $install=Join-Path $root 'Tool';$data=Join-Path $root 'Data';$official=Join-Path $root 'Official'
 $fake=ConvertTo-SecureString 'fixture-host-no-real-key' -AsPlainText -Force
@@ -12,6 +10,15 @@ $fixtureExe=Join-Path $root 'Fixture.exe'
 Add-Type -Path "$PSScriptRoot\Fixture.cs" -ReferencedAssemblies System.Windows.Forms,System.Drawing -OutputAssembly $fixtureExe -OutputType WindowsApplication
 & "$PSScriptRoot\..\scripts\Install.ps1" -InstallDirectory $install -DataDirectory $data -OfficialHome $official -OfficialProfile (Join-Path $root 'OfficialProfile') -Executable $fixtureExe -BaseUrl 'https://example.com/v1' -Model 'example-model' -ApiKey $fake -NoShortcuts
 $exe=Join-Path $install 'CodexDualController.exe';$configPath=Join-Path $install 'instances.local.json';$config=Read-ControllerConfig $configPath
+# Test only the disposable installed script under a unique mutex. Keep the live
+# controller untouched; Test-Controller separately exercises singleton enforcement.
+$installedController=Join-Path $install 'src\Controller.ps1'
+$installedText=[IO.File]::ReadAllText($installedController)
+$productionMutex="'Local\CodexDual.Controller.'"
+if(-not $installedText.Contains($productionMutex)){throw 'Controller mutex test seam not found'}
+$installedText=$installedText.Replace($productionMutex,("'Local\CodexDual.HostTest."+[Guid]::NewGuid().ToString('N')+".'"))
+[IO.File]::WriteAllText($installedController,$installedText,(New-Object Text.UTF8Encoding($true)))
+$panelPattern='*'+(Get-Content (Join-Path $install 'version.json') -Raw|ConvertFrom-Json).version+'*'
 $original=@(Get-ProcessSnapshot|Where-Object {$_.Name -in @('ChatGPT.exe','Codex.exe')})
 $script:passed=0
 function Check($Value,$Message){if(-not $Value){throw "FAIL: $Message"};$script:passed++;Write-Output "PASS: $Message"}
@@ -39,8 +46,42 @@ try{
     Check (@([CodexDual.Native]::Windows($process.Id)|Where-Object {$_.Visible}).Count -eq 0) 'Compiled EXE background mode has no visible panel'
     $second=Start-TestHost ('--config "'+$configPath+'"')
     try{Check ($second.WaitForExit(12000) -and $second.ExitCode -eq 0) 'Second EXE launch forwards to existing controller'}finally{$second.Dispose()}
-    Wait-Condition {(Find-Window '*0.3*').Count -eq 1} 'main panel visible'
-    $main=(Find-Window '*0.3*')[0];$element=Get-Element $main.Handle
+    Wait-Condition {(Find-Window $panelPattern).Count -eq 1} 'main panel visible'
+    $main=(Find-Window $panelPattern)[0];$element=Get-Element $main.Handle
+    # Actual 0.4 controls against two disposable GUI instances, including window selection.
+    $officialFixture=$config.instances[0]
+    Write-AtomicText (Join-Path $officialFixture.profile 'stubborn.fixture') ''
+    Click-Button $element '同时打开两边'
+    foreach($role in @('official','api')){
+        Wait-Condition {(Find-Window '选择要显示的窗口').Count -eq 1} ('window selection '+$role)
+        $selectionHandle=(Find-Window '选择要显示的窗口')[0].Handle
+        Click-Button $selectionHandle '显示选中窗口'
+        Wait-Condition {@((Find-Window '选择要显示的窗口')|Where-Object {$_.Handle -eq $selectionHandle}).Count -eq 0} ('window selection closed '+$role)
+    }
+    Wait-Condition {[CodexDualTests.HostAutomation]::Responds($main.Handle)} 'dual open completed'
+    foreach($instance in $config.instances){
+        $status=Get-InstanceStatus $config $instance
+        Check ($status.State -eq 'Running') ('Both-open button starts '+$instance.role+' fixture')
+        $fixtureProcesses+=$status.Process
+    }
+    Click-Button $element '同时打开两边'
+    Wait-Condition {(Find-Window '选择要显示的窗口').Count -eq 1} 'repeat official selector'
+    $cancelHandle=(Find-Window '选择要显示的窗口')[0].Handle
+    [CodexDualTests.HostAutomation]::CloseLikeUser($cancelHandle)
+    Wait-Condition {@((Find-Window '选择要显示的窗口')|Where-Object {$_.Handle -ne $cancelHandle}).Count -eq 1} 'API selector follows cancellation'
+    Click-Button (Find-Window '选择要显示的窗口')[0].Handle '显示选中窗口'
+    Wait-Condition {(Find-Window '选择要显示的窗口').Count -eq 0} 'repeat API selected'
+    foreach($fixture in $fixtureProcesses){Check (Test-ExpectedProcessAlive $fixture) 'Repeat dual open retains the original fixture process'}
+    Check (@(Get-ProcessSnapshot|Where-Object {Test-SamePath $_.Path $fixtureExe}).Count -eq 2) 'Repeat dual open creates no duplicate process'
+    Check (@([CodexDualTests.HostAutomation]::Children($element,'BUTTON','常用目录…')).Count -eq 2) 'Each environment exposes its own folder menu'
+    Click-Button $element '检查环境'
+    Wait-Condition {(Find-Window '环境检查 · 脱敏报告').Count -eq 1} 'redacted diagnostics visible'
+    $diagnosticHandle=(Find-Window '环境检查 · 脱敏报告')[0].Handle
+    $reportControls=[CodexDualTests.HostAutomation]::Describe($process.Id)
+    Check ($reportControls.Contains('可分享诊断报告') -and -not $reportControls.Contains('fixture-host-no-real-key') -and -not $reportControls.Contains($root)) 'Actual diagnostics dialog renders without fixture secrets or paths'
+    Check (@([CodexDualTests.HostAutomation]::Children($diagnosticHandle,'BUTTON','复制报告')).Count -eq 1 -and @([CodexDualTests.HostAutomation]::Children($diagnosticHandle,'BUTTON','导出报告…')).Count -eq 1) 'Diagnostics exposes copy and export controls'
+    Click-Button $diagnosticHandle '关闭'
+    Wait-Condition {(Find-Window '环境检查 · 脱敏报告').Count -eq 0} 'diagnostics closed'
     Click-Button $element '改名'
     Wait-Condition {(Find-Window '修改显示名称').Count -eq 1} 'rename dialog'
     $dialog=Get-Element (Find-Window '修改显示名称')[0].Handle
@@ -69,11 +110,11 @@ try{
     [CodexDualTests.HostAutomation]::CloseLikeUser($apiWindow.Handle)
     Wait-Condition {(Find-Window 'API 渠道管理').Count -eq 0} 'API manager closed'
     [CodexDualTests.HostAutomation]::CloseLikeUser($main.Handle)
-    Wait-Condition {(Find-Window '*0.3*').Count -eq 0} 'panel hidden to tray'
+    Wait-Condition {(Find-Window $panelPattern).Count -eq 0} 'panel hidden to tray'
     Check (-not $process.HasExited) 'Closing panel keeps compiled controller running'
     $again=Start-TestHost ('--config "'+$configPath+'"')
     try{Check ($again.WaitForExit(12000) -and $again.ExitCode -eq 0) 'Restore request exits after forwarding'}finally{if(-not $again.HasExited){$again.Kill();$again.WaitForExit()};$again.Dispose()}
-    Wait-Condition {(Find-Window '*0.3*').Count -eq 1} 'panel restored'
+    Wait-Condition {(Find-Window $panelPattern).Count -eq 1} 'panel restored'
     Check (@(Get-ProcessSnapshot|Where-Object {Test-SamePath $_.Path $exe}).Count -eq 1) 'Repeated taskbar-style launch keeps one compiled host'
     # Exercise real instance exit buttons against disposable GUI processes only.
     $officialFixture=$config.instances[0]
@@ -108,11 +149,11 @@ try{
     Check (-not (Test-ExpectedProcessAlive $other)) 'Normal multi-window exit completes without a force prompt'
     [CodexDualTests.HostAutomation]::Answer([CodexDualTests.HostAutomation]::FindDialog($process.Id,'退出结果'),1)
     Start-Sleep -Milliseconds 600
-    $element=Get-Element (Find-Window '*0.3*')[0].Handle
+    $element=Get-Element (Find-Window $panelPattern)[0].Handle
     Click-Button $element '退出工具'
     Check ($process.WaitForExit(12000)) 'Exit button ends only test controller'
     $after=Get-ProcessSnapshot
     Check (@($original|Where-Object {$saved=$_;@($after|Where-Object {Test-ProcessIdentity $saved $_}).Count -ne 1}).Count -eq 0) 'Original Codex processes retained throughout EXE UI test'
 }catch{if($process -and -not $process.HasExited){Write-Output ([CodexDualTests.HostAutomation]::Describe($process.Id))};throw}
-finally{if($process){if(-not $process.HasExited){$process.Kill();$process.WaitForExit()};$process.Dispose()};foreach($fixture in $fixtureProcesses){Stop-VerifiedProcess $fixture}}
+finally{if($process){if(-not $process.HasExited){$process.Kill();$process.WaitForExit()};$process.Dispose()};foreach($fixture in @(Get-ProcessSnapshot|Where-Object {Test-SamePath $_.Path $fixtureExe})){Stop-VerifiedProcess $fixture}}
 Write-Output "PASSED: $script:passed compiled-host checks. Output: $root"

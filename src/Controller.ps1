@@ -2,13 +2,15 @@
     [string]$ConfigPath = '',
     [ValidateSet('tray','panel','configure','official','api','status')][string]$Action = 'panel',
     [switch]$SmokeTest,
-    [ValidateSet('main','api')][string]$Preview='main',
+    [ValidateSet('main','api','diagnostics')][string]$Preview='main',
     [string]$ScreenshotPath,
     [Action[string]]$LifecycleObserver
 )
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 . "$PSScriptRoot\Instances.ps1"
+. "$PSScriptRoot\DailyActions.ps1"
+. "$PSScriptRoot\Diagnostics.ps1"
 . "$PSScriptRoot\Panel.ps1"
 [Windows.Forms.Application]::EnableVisualStyles()
 function Show-Error($ErrorRecord) {if($SmokeTest){throw $ErrorRecord};[void][Windows.Forms.MessageBox]::Show($ErrorRecord.Exception.Message,'Codex 双环境','OK','Warning')}
@@ -37,11 +39,12 @@ try {
             foreach($w in $windows){[void]$list.Items.Add($w.Title+'  [窗口 '+$w.Handle+']')};$list.SelectedIndex=0
             $button=New-Object Windows.Forms.Button;$button.Text='显示选中窗口';$button.Dock='Bottom';$button.DialogResult='OK'
             $dialog.Controls.Add($list);$dialog.Controls.Add($button);$dialog.AcceptButton=$button
-            try{if($dialog.ShowDialog() -ne 'OK'){return};$selected=$windows[$list.SelectedIndex]}finally{$dialog.Dispose()}
+            try{if($dialog.ShowDialog() -ne 'OK'){return 'Cancelled'};$selected=$windows[$list.SelectedIndex]}finally{$dialog.Dispose()}
         }
         if(-not (Show-InstanceWindow $instance $process $selected.Handle)){
-            [void][Windows.Forms.MessageBox]::Show('目标窗口已恢复，但 Windows 拒绝抢占前台。请点击其任务栏窗口。','Codex 双环境')
+            return 'Running'
         }
+        return 'Shown'
     }
     function Close-Instance($instance) {
         Invoke-InstanceLocked $instance {
@@ -63,7 +66,7 @@ try {
             [void][Windows.Forms.MessageBox]::Show($text,'退出结果')
         }
     }
-    if($Action -in @('official','api')) {Open-Instance @($config.instances | Where-Object {$_.role -eq $Action})[0];return}
+    if($Action -in @('official','api')) {$outcome=Open-Instance @($config.instances | Where-Object {$_.role -eq $Action})[0];if($outcome -eq 'Running'){[void][Windows.Forms.MessageBox]::Show('目标窗口已恢复，但 Windows 拒绝抢占前台。请点击其任务栏窗口。','Codex 双环境')};return}
     $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $hashAlgorithm=[Security.Cryptography.SHA256]::Create()
     try{$configHash=[BitConverter]::ToString($hashAlgorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($ConfigPath).ToLowerInvariant()))).Replace('-','')}finally{$hashAlgorithm.Dispose()}
@@ -95,8 +98,9 @@ try {
         foreach($role in @('official','api')){
             $entry=$menu.Items.Add($(if($role -eq 'official'){'启动或显示官方版'}else{'启动或显示 API 版'}));$entry.Tag=$role
             $script:openMenus[$role]=$entry
-            $entry.Add_Click({param($sender,$eventArgs) $sender.Owner.Close();[Windows.Forms.Application]::DoEvents();$target=$sender.Tag;Invoke-PanelAction {Open-Instance @($config.instances | Where-Object {$_.role -eq $target})[0]}})
+            $entry.Add_Click({param($sender,$eventArgs) $sender.Owner.Close();[Windows.Forms.Application]::DoEvents();$target=$sender.Tag;Invoke-PanelAction {Open-PanelInstance @($config.instances | Where-Object {$_.role -eq $target})[0]}})
         }
+        $bothEntry=$menu.Items.Add('同时打开两边');$bothEntry.Add_Click({$menu.Close();Show-ControlPanel;Invoke-PanelAction {Open-BothPanelInstances}})
         [void]$menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))
         foreach($role in @('official','api')){
             $entry=$menu.Items.Add($(if($role -eq 'official'){'退出官方版…'}else{'退出 API 版…'}));$entry.Tag=$role
@@ -115,35 +119,38 @@ try {
         $tray.ContextMenuStrip=$menu;$tray.Visible=$true
         $tray.Add_MouseClick({param($sender,$eventArgs) if(-not $script:uiBusy -and $eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left){Show-ControlPanel}})
         $panel=New-Object Windows.Forms.Form
-        $panel.Text=$controllerLabel+' · 0.3';$panel.ClientSize=New-Object Drawing.Size(520,366)
+        $version=(Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'version.json') -Raw -Encoding UTF8|ConvertFrom-Json).version
+        $panel.Text=$controllerLabel+' · '+$version;$panel.ClientSize=New-Object Drawing.Size(520,450)
         $panel.FormBorderStyle='FixedSingle';$panel.MaximizeBox=$false;$panel.StartPosition='Manual'
         $panel.Icon=$tray.Icon;$panel.Font=New-Object Drawing.Font('Microsoft YaHei UI',10)
         $panel.BackColor=[Drawing.ColorTranslator]::FromHtml('#F5F7FA')
-        $heading=New-UiLabel $panel '两个窗口，各自工作' 20 16 470 32;$heading.Font=New-Object Drawing.Font('Microsoft YaHei UI',14,[Drawing.FontStyle]::Bold)
+        $heading=New-UiLabel $panel '两个窗口，各自工作' 20 16 322 32;$heading.Font=New-Object Drawing.Font('Microsoft YaHei UI',14,[Drawing.FontStyle]::Bold)
+        [void](New-UiButton $panel '同时打开两边' 354 16 146 {Invoke-PanelAction {Open-BothPanelInstances}})
         $panelLabels=@{}
         foreach($role in @('official','api')){
             $x=if($role -eq 'official'){20}else{266}
-            $card=New-Object Windows.Forms.Panel;$card.SetBounds($x,58,234,122);$card.BackColor=[Drawing.Color]::White;$panel.Controls.Add($card)
+            $card=New-Object Windows.Forms.Panel;$card.SetBounds($x,58,234,164);$card.BackColor=[Drawing.Color]::White;$panel.Controls.Add($card)
             $name=New-UiLabel $card '' 12 10 210 25;$name.AutoEllipsis=$true;$name.Font=New-Object Drawing.Font('Microsoft YaHei UI',11,[Drawing.FontStyle]::Bold);$script:instanceNames[$role]=$name
             $label=New-UiLabel $card '读取状态…' 12 38 212 25;$label.AutoEllipsis=$true;$panelLabels[$role]=$label
-            $button=New-UiButton $card '打开' 10 78 64 {param($sender,$e) $target=$sender.Tag;Invoke-PanelAction {Open-Instance @($config.instances|Where-Object {$_.role -eq $target})[0]}};$button.Tag=$role
+            $button=New-UiButton $card '打开' 10 78 64 {param($sender,$e) $target=$sender.Tag;Invoke-PanelAction {Open-PanelInstance @($config.instances|Where-Object {$_.role -eq $target})[0]}};$button.Tag=$role
             $closeButton=New-UiButton $card '退出…' 80 78 72 {param($sender,$e) $target=$sender.Tag;Invoke-PanelAction {Close-Instance @($config.instances|Where-Object {$_.role -eq $target})[0]}};$closeButton.Tag=$role
             $rename=New-UiButton $card '改名' 158 78 64 {param($sender,$e) $target=$sender.Tag;Show-NameDialog @($config.instances|Where-Object {$_.role -eq $target})[0]};$rename.Tag=$role
+            $folders=New-UiButton $card '常用目录…' 10 120 212 {param($sender,$e) $target=$sender.Tag;Show-InstanceDirectoryMenu @($config.instances|Where-Object {$_.role -eq $target})[0] $sender};$folders.Tag=$role
         }
-        $script:apiSummary=New-UiLabel $panel 'API 渠道' 20 194 480 26
-        $script:profilePicker=New-Object Windows.Forms.ComboBox;$script:profilePicker.DropDownStyle='DropDownList';$script:profilePicker.SetBounds(20,224,224,30);$panel.Controls.Add($script:profilePicker)
-        $script:applyButton=New-UiButton $panel '应用渠道' 254 223 112 {Invoke-PanelAction {Apply-SelectedProfile $script:profilePicker.SelectedItem $false}}
-        [void](New-UiButton $panel '管理 API' 376 223 124 {Show-ApiManager})
-        $script:feedback=New-UiLabel $panel '关闭面板收起到托盘；窗口位置会记住。' 20 267 480 43
-        $startup=New-Object Windows.Forms.CheckBox;$startup.Text='登录时自动打开控制面板';$startup.SetBounds(20,317,272,28);$panel.Controls.Add($startup)
+        $script:apiSummary=New-UiLabel $panel 'API 渠道' 20 236 480 26
+        $script:profilePicker=New-Object Windows.Forms.ComboBox;$script:profilePicker.DropDownStyle='DropDownList';$script:profilePicker.SetBounds(20,266,224,30);$panel.Controls.Add($script:profilePicker)
+        $script:applyButton=New-UiButton $panel '应用渠道' 254 265 112 {Invoke-PanelAction {Apply-SelectedProfile $script:profilePicker.SelectedItem $false}}
+        [void](New-UiButton $panel '管理 API' 376 265 124 {Show-ApiManager})
+        $script:feedback=New-UiLabel $panel '关闭面板收起到托盘；窗口位置会记住。' 20 309 480 76
+        $startup=New-Object Windows.Forms.CheckBox;$startup.Text='登录时自动打开控制面板';$startup.SetBounds(20,401,272,28);$panel.Controls.Add($startup)
         $toolRoot=Split-Path $PSScriptRoot -Parent
         $startup.Checked=[bool](Repair-ControllerAutoStart $toolRoot $ConfigPath)
         $startup.Add_Click({
             try{Set-ControllerAutoStart $toolRoot $ConfigPath $startup.Checked;Set-UiMessage $(if($startup.Checked){'已开启：登录后自动打开控制面板，Codex 仍由你手动打开。'}else{'已关闭控制器自启动。'})}
             catch{$startup.Checked=[bool](Test-ControllerAutoStart $toolRoot $ConfigPath);Show-Error $_}
         })
-        [void](New-UiButton $panel '检查环境' 300 315 96 {Show-ControllerDiagnostics})
-        [void](New-UiButton $panel '退出工具' 404 315 96 {Save-PanelPosition;$script:quittingController=$true;$context.ExitThread()})
+        [void](New-UiButton $panel '检查环境' 300 399 96 {Show-ControllerDiagnostics})
+        [void](New-UiButton $panel '退出工具' 404 399 96 {Save-PanelPosition;$script:quittingController=$true;$context.ExitThread()})
         function Update-PanelStatus {
             foreach($instance in $config.instances){
                 $kind=if($instance.role -eq 'official'){'官方订阅'}else{'API'}
@@ -178,7 +185,7 @@ try {
                 $method=$tray.GetType().GetMethod('OnMouseClick',[Reflection.BindingFlags]'Instance,NonPublic')
                 [void]$method.Invoke($tray.PSObject.BaseObject,[object[]]@($mouse.PSObject.BaseObject))
                 if(-not $panel.Visible -or $menu.Visible -or $panel.Location -ne $originalPoint){throw 'Left click must reveal the stationary panel, not a popup menu'}
-                if($Preview -eq 'api'){Show-ApiManager}elseif($ScreenshotPath){Save-UiScreenshot $panel $ScreenshotPath}
+                if($Preview -eq 'api'){Show-ApiManager}elseif($Preview -eq 'diagnostics'){Show-ControllerDiagnostics}elseif($ScreenshotPath){Save-UiScreenshot $panel $ScreenshotPath}
             }else{
             $menu.Show(50,50);[Windows.Forms.Application]::DoEvents()
             if($ScreenshotPath){$bmp=New-Object Drawing.Bitmap($menu.Width,$menu.Height);try{$menu.DrawToBitmap($bmp,(New-Object Drawing.Rectangle(0,0,$menu.Width,$menu.Height)));$bmp.Save($ScreenshotPath)}finally{$bmp.Dispose()}}

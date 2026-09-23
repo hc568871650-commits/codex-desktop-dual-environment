@@ -15,6 +15,9 @@ Write-Output 'PASS: actual tray menu renders and disposes without exiting Codex'
 & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $controller -ConfigPath $path -Action panel -SmokeTest -ScreenshotPath "$root\panel.png"
 if($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath "$root\panel.png")){throw 'Panel smoke failed'}
 Write-Output 'PASS: taskbar control panel renders and disposes'
+& powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $controller -ConfigPath $path -Action panel -Preview diagnostics -SmokeTest -ScreenshotPath "$root\diagnostics.png"
+if($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath "$root\diagnostics.png")){throw 'Diagnostics smoke failed'}
+Write-Output 'PASS: redacted diagnostics report renders and disposes'
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $algorithm=[Security.Cryptography.SHA256]::Create()
 try{$hash=[BitConverter]::ToString($algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($path.ToLowerInvariant()))).Replace('-','')}finally{$algorithm.Dispose()}
@@ -27,4 +30,4 @@ try{
     if($p.ExitCode -eq 0 -or -not $err.Contains('Controller already running')){throw 'Singleton enforcement failed'}
     $p.Dispose();Write-Output 'PASS: second controller process refused by per-user mutex'
 }finally{$mutex.ReleaseMutex();$mutex.Dispose()}
-Write-Output 'PASSED: 3 controller checks'
+Write-Output 'PASSED: 4 controller checks'

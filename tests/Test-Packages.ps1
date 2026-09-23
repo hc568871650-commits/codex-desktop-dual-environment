@@ -30,8 +30,17 @@ Expand-Archive -LiteralPath $BaselineArchive -DestinationPath $baseline
 $install=Join-Path $root 'OldInstall';$data=Join-Path $root 'OldData';$official=Join-Path $root 'Official'
 $fake=ConvertTo-SecureString 'fixture-package-key' -AsPlainText -Force
 & "$baseline\scripts\Install.ps1" -InstallDirectory $install -DataDirectory $data -OfficialHome $official -Executable "$env:SystemRoot\System32\notepad.exe" -BaseUrl 'https://example.com/v1' -Model 'fixture-model' -ApiKey $fake -NoShortcuts
-Check ((Get-Content "$install\version.json" -Raw|ConvertFrom-Json).version -eq '0.2.0') 'Baseline comes from actual 0.2.0 package'
+$baselineVersion=(Get-Content "$baseline\version.json" -Raw|ConvertFrom-Json).version
+Check ((Get-Content "$install\version.json" -Raw|ConvertFrom-Json).version -eq $baselineVersion -and [version]$baselineVersion -lt [version]$expectedVersion) ('Baseline comes from actual '+$baselineVersion+' package')
 $protected=@("$install\instances.local.json","$official\config.toml","$data\API\CodexHome\config.toml","$data\API\CodexHome\auth.json","$data\API\Credentials\api-key.dpapi")
+if([version]$baselineVersion -ge [version]'0.3.0'){
+    . "$install\src\Instances.ps1"
+    $oldConfig=Read-ControllerConfig (Join-Path $install 'instances.local.json')
+    [void](Set-InstanceDisplayName $oldConfig $oldConfig.instances[0] '保留的工作名称')
+    $channelKey=ConvertTo-SecureString 'fixture-preserved-channel-key' -AsPlainText -Force
+    try{[void](Save-ApiProfile $oldConfig $oldConfig.instances[1] '' '保留的渠道' 'https://example.com/v1' 'fixture-model' $channelKey)}finally{$channelKey.Dispose()}
+    $protected+=@((Get-ControllerPreferencesPath $oldConfig),(Join-Path $data 'API\api-providers.local.json'))
+}
 $hashes=@{};foreach($path in $protected){$hashes[$path]=(Get-FileHash -LiteralPath $path).Hash}
 # Load upgrade functions in a fresh process: .NET types from the old package must
 # not mask a missing assembly/source in the new package.
@@ -48,7 +57,7 @@ try{
 [IO.File]::WriteAllText($driver,$driverText,(New-Object Text.UTF8Encoding($true)))
 $resultPath=Join-Path $root 'upgrade-result.json'
 & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $driver -Upgrade $upgrade -Target $install -ReportPath $resultPath
-Check ($LASTEXITCODE -eq 0 -and (Get-Content $resultPath -Raw|ConvertFrom-Json).Mode -eq 'Upgrade' -and (Get-Content "$install\version.json" -Raw|ConvertFrom-Json).version -eq $expectedVersion) 'Actual upgrade ZIP automatically discovers and upgrades installed 0.2.0'
+Check ($LASTEXITCODE -eq 0 -and (Get-Content $resultPath -Raw|ConvertFrom-Json).Mode -eq 'Upgrade' -and (Get-Content "$install\version.json" -Raw|ConvertFrom-Json).version -eq $expectedVersion) ('Actual upgrade ZIP automatically discovers and upgrades installed '+$baselineVersion)
 foreach($path in $protected){Check ((Get-FileHash -LiteralPath $path).Hash -eq $hashes[$path]) ('Packaged upgrade preserves '+[IO.Path]::GetFileName($path))}
 Check (Test-Path -LiteralPath "$install\src\TomlConfig.cs") 'Packaged upgrade includes new runtime source'
 & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$install\src\Controller.ps1" -ConfigPath "$install\instances.local.json" -Action panel -SmokeTest -ScreenshotPath "$root\upgraded-panel.png"

@@ -105,14 +105,14 @@ function Apply-SelectedProfile($Profile,[bool]$Restart) {
     $saved.pendingApi=if($applied -eq 'Deferred' -and $before.State -eq 'Running'){@{pid=$before.Process.Id;started=$before.Process.Started}}else{$null}
     Save-ControllerPreferences $config $saved;$script:preferences=$saved
     if($applied -eq 'Deferred'){Set-UiMessage '渠道已暂存。请在结束任务后重启 API 窗口，使新配置和密钥生效。'}
-    elseif($Restart){Open-Instance $instance;Set-UiMessage '渠道已应用，API 窗口已重新打开。'}
+    elseif($Restart){$outcome=Open-Instance $instance;Set-UiMessage ('渠道已应用。'+(Get-OpenOutcomeText $outcome))}
     else{Set-UiMessage '渠道已应用，下次打开 API 窗口时使用。'}
     Update-ApiSummary
 }
 function Show-ApiManager {
     if($script:apiDialog -and -not $script:apiDialog.IsDisposed){$script:apiDialog.Activate();return}
     $instance=$script:apiInstance
-    if($instance.launchMode -ne 'managed-api'){[void][Windows.Forms.MessageBox]::Show('此实例使用已登记的外部启动器，请通过原工具配置 API。可在“检查环境”查看路径。','API 管理');return}
+    if($instance.launchMode -ne 'managed-api'){[void][Windows.Forms.MessageBox]::Show('此实例使用已登记的外部启动器，请通过原工具配置 API。可从“常用目录…”打开配置目录。','API 管理');return}
     $dialog=New-Object Windows.Forms.Form;$dialog.Text='API 渠道管理';$dialog.ClientSize=New-Object Drawing.Size(640,570)
     $dialog.FormBorderStyle='FixedDialog';$dialog.MaximizeBox=$false;$dialog.MinimizeBox=$false;$dialog.StartPosition='Manual';$dialog.Location=$panel.Location;$dialog.Font=$panel.Font
     $tabs=New-Object Windows.Forms.TabControl;$tabs.Dock='Fill';$dialog.Controls.Add($tabs)
@@ -206,26 +206,69 @@ function Show-ApiManager {
         else{[void]$dialog.ShowDialog($panel)}
     }finally{$keyBox.Clear();$dialog.Dispose();$script:apiDialog=$null}
 }
-function Show-ControllerDiagnostics {
-    $lines=New-Object 'Collections.Generic.List[string]'
-    foreach($instance in $config.instances){
-        $name=Get-InstanceDisplayName $instance (Read-ControllerPreferences $config)
-        $lines.Add('【'+$name+'】');$lines.Add('配置目录：'+$instance.home)
-        try{$status=Get-InstanceStatus $config $instance;$lines.Add('实例：'+$status.Reason)}catch{$lines.Add('实例检查：'+$_.Exception.Message)}
-        try{foreach($key in @('home','profile','projects','projectless')){if($instance.$key -and -not (Test-Path -LiteralPath $instance.$key -PathType Container)){$lines.Add('缺少目录：'+$key)}}
-            if($instance.role -eq 'api' -and $instance.launchMode -eq 'managed-api'){
-                if((Get-ApiManagementMode $instance.apiRoot) -eq 'ccs'){$meta=Get-Content -LiteralPath (Join-Path $instance.apiRoot '.codex-dual.json') -Raw -Encoding UTF8|ConvertFrom-Json;[void](Test-CcsBinding $instance $meta.ccsSettingsPath $meta.ccsExecutable);$lines.Add('CCS 目标目录：匹配')}
-                $official=@($config.instances|Where-Object {$_.role -eq 'official'})[0]
-                $probe=New-CodexStartInfo -Executable (Find-CodexExecutable $instance.executable) -OfficialHome $official.home -ApiRoot $instance.apiRoot -Api
-                $probe.EnvironmentVariables.Remove('CODEX_DUAL_API_KEY');$lines.Add('启动配置与凭据入口：检查通过')
-            }
-        }catch{$lines.Add('配置检查：'+$_.Exception.Message)}
-        $lines.Add('')
+function Get-OpenOutcomeText([string]$Outcome) {
+    switch($Outcome){
+        'Shown' {'已显示窗口'}
+        'Running' {'已运行；请点击其任务栏窗口'}
+        'Cancelled' {'已取消窗口选择，实例保持运行'}
+        default {'打开失败，请检查环境'}
     }
-    $lines.Add('检查未发送 API 请求。运行状态不代表任务空闲。')
-    $dialog=New-Object Windows.Forms.Form;$dialog.Text='环境检查';$dialog.Size=New-Object Drawing.Size(680,470);$dialog.StartPosition='CenterParent';$dialog.Font=$panel.Font
-    $text=New-Object Windows.Forms.TextBox;$text.Multiline=$true;$text.ReadOnly=$true;$text.ScrollBars='Both';$text.Dock='Fill';$text.Text=$lines -join [Environment]::NewLine;$dialog.Controls.Add($text)
-    try{[void]$dialog.ShowDialog($panel)}finally{$dialog.Dispose()}
+}
+function Open-PanelInstance($Instance) {
+    $outcome=Open-Instance $Instance
+    Set-UiMessage ((Get-InstanceDisplayName $Instance $script:preferences)+'：'+(Get-OpenOutcomeText $outcome))
+}
+function Open-BothPanelInstances {
+    Set-UiMessage '正在分别打开两边；已有实例将找回窗口。';$panel.Refresh()
+    $results=@(Invoke-DualOpen $config {param($instance) Open-Instance $instance})
+    $lines=@(foreach($result in $results){
+        $instance=@($config.instances|Where-Object {$_.role -eq $result.Role})[0]
+        (Get-InstanceDisplayName $instance $script:preferences)+'：'+(Get-OpenOutcomeText $result.Outcome)
+    })
+    Set-UiMessage ($lines -join [Environment]::NewLine)
+    $failures=@($results|Where-Object {$_.Outcome -eq 'Failed'})
+    if($failures.Count){
+        $detail=@(foreach($failure in $failures){
+            $instance=@($config.instances|Where-Object {$_.role -eq $failure.Role})[0]
+            (Get-InstanceDisplayName $instance $script:preferences)+'：'+$failure.Error
+        }) -join [Environment]::NewLine
+        [void][Windows.Forms.MessageBox]::Show($panel,$detail,'部分环境未能打开','OK','Warning')
+    }
+}
+function Show-InstanceDirectoryMenu($Instance,$Button) {
+    $folders=New-Object Windows.Forms.ContextMenuStrip
+    foreach($entry in @(@('projects','项目目录'),@('projectless','无项目任务目录'),@('home','配置目录'))){
+        $item=$folders.Items.Add($entry[1]);$item.Tag=@{Instance=$Instance;Kind=$entry[0]}
+        $item.Add_Click({param($sender,$eventArgs)
+            $target=$sender.Tag.Instance;$kind=$sender.Tag.Kind
+            Invoke-PanelAction {Open-InstanceDirectory $target $kind;Set-UiMessage '已请求资源管理器打开该环境的目录。'}
+        })
+    }
+    # Owned by the button so repeated openings dispose the previous menu safely.
+    if($Button.ContextMenuStrip){$Button.ContextMenuStrip.Dispose()}
+    $Button.ContextMenuStrip=$folders
+    $folders.Show($Button,(New-Object Drawing.Point(0,$Button.Height)))
+}
+function Show-ControllerDiagnostics {
+    try{$report=Get-ControllerDiagnostics $config (Split-Path $PSScriptRoot -Parent);$reportText=ConvertTo-ControllerDiagnosticText $report}
+    catch{Show-Error $_;return}
+    $dialog=New-Object Windows.Forms.Form;$dialog.Text='环境检查 · 脱敏报告';$dialog.ClientSize=New-Object Drawing.Size(720,510);$dialog.StartPosition='CenterParent';$dialog.Font=$panel.Font
+    $dialog.MinimumSize=New-Object Drawing.Size(650,440)
+    $bar=New-Object Windows.Forms.Panel;$bar.Dock='Bottom';$bar.Height=56;$dialog.Controls.Add($bar)
+    $text=New-Object Windows.Forms.TextBox;$text.Multiline=$true;$text.ReadOnly=$true;$text.ScrollBars='Vertical';$text.WordWrap=$true;$text.Dock='Fill';$text.Text=$reportText;$dialog.Controls.Add($text);$text.BringToFront()
+    $hint=New-UiLabel $bar '不含密钥、API 地址或个人路径。' 12 17 340 28
+    $copy=New-UiButton $bar '复制报告' 370 12 100 {
+        try{[Windows.Forms.Clipboard]::SetText($text.Text);$hint.Text='已复制脱敏报告。'}catch{$hint.Text='复制失败，请稍后重试。'}
+    };$copy.Anchor='Top,Right'
+    $save=New-UiButton $bar '导出报告…' 482 12 112 {
+        $picker=New-Object Windows.Forms.SaveFileDialog;$picker.Filter='文本报告 (*.txt)|*.txt';$picker.FileName='CodexDual-diagnostics-'+[DateTime]::Now.ToString('yyyyMMdd-HHmmss')+'.txt';$picker.OverwritePrompt=$false
+        try{if($picker.ShowDialog($dialog) -eq 'OK'){Export-ControllerDiagnostics $report $picker.FileName;$hint.Text='脱敏报告已保存。'}}catch{$hint.Text='保存失败，请选择一个未使用的文件名。'}finally{$picker.Dispose()}
+    };$save.Anchor='Top,Right'
+    $close=New-UiButton $bar '关闭' 606 12 100 {$dialog.Close()};$close.Anchor='Top,Right';$dialog.CancelButton=$close
+    try{
+        if($SmokeTest -and $Preview -eq 'diagnostics'){$dialog.Show();[Windows.Forms.Application]::DoEvents();Save-UiScreenshot $dialog $ScreenshotPath}
+        else{[void]$dialog.ShowDialog($panel)}
+    }finally{$dialog.Dispose()}
 }
 function Save-UiScreenshot($Form,[string]$Path) {
     $bmp=New-Object Drawing.Bitmap($Form.Width,$Form.Height)
