@@ -117,7 +117,7 @@ try {
             }
         })
         $tray.ContextMenuStrip=$menu;$tray.Visible=$true
-        $tray.Add_MouseClick({param($sender,$eventArgs) if(-not $script:uiBusy -and $eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left){Show-ControlPanel}})
+        $tray.Add_MouseClick({param($sender,$eventArgs) if($eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left){Invoke-PanelAction {Open-PanelInstance $script:apiInstance}}})
         $panel=New-Object Windows.Forms.Form
         $version=(Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'version.json') -Raw -Encoding UTF8|ConvertFrom-Json).version
         $panel.Text=$controllerLabel+' · '+$version;$panel.ClientSize=New-Object Drawing.Size(520,450)
@@ -183,8 +183,22 @@ try {
                 $panel.Hide()
                 $mouse=New-Object Windows.Forms.MouseEventArgs([Windows.Forms.MouseButtons]::Left,1,0,0,0)
                 $method=$tray.GetType().GetMethod('OnMouseClick',[Reflection.BindingFlags]'Instance,NonPublic')
+                $script:smokeOpenedInstances=@()
+                $script:smokeOpenError=$false
+                function script:Open-PanelInstance($Instance) {if($script:smokeOpenError){throw 'Tray fixture failure'};$script:smokeOpenedInstances+=,$Instance}
                 [void]$method.Invoke($tray.PSObject.BaseObject,[object[]]@($mouse.PSObject.BaseObject))
-                if(-not $panel.Visible -or $menu.Visible -or $panel.Location -ne $originalPoint){throw 'Left click must reveal the stationary panel, not a popup menu'}
+                if($script:smokeOpenedInstances.Count -ne 1 -or -not [object]::ReferenceEquals($script:smokeOpenedInstances[0],$script:apiInstance) -or $panel.Visible -or $menu.Visible){throw 'Left click must open the configured API instance without showing the panel or menu'}
+                $script:uiBusy=$true
+                try{[void]$method.Invoke($tray.PSObject.BaseObject,[object[]]@($mouse.PSObject.BaseObject))}finally{$script:uiBusy=$false}
+                if($script:smokeOpenedInstances.Count -ne 1){throw 'Left click must not reenter while the UI is busy'}
+                $script:smokeOpenError=$true
+                try{[void]$method.Invoke($tray.PSObject.BaseObject,[object[]]@($mouse.PSObject.BaseObject));throw 'Left-click failure was not reported'}
+                catch{if(-not $_.Exception.ToString().Contains('Tray fixture failure')){throw}}
+                finally{$script:smokeOpenError=$false}
+                if($script:uiBusy -or $script:smokeOpenedInstances.Count -ne 1){throw 'Left-click failure must release the busy state without starting another instance'}
+                if($Preview -eq 'main'){Write-Output 'PASS: tray left click targets API instance, guards reentry, and reports failures without launching software'}
+                Show-ControlPanel
+                if(-not $panel.Visible -or $panel.Location -ne $originalPoint){throw 'Panel position retention failed after tray click'}
                 if($Preview -eq 'api'){Show-ApiManager}elseif($Preview -eq 'diagnostics'){Show-ControllerDiagnostics}elseif($ScreenshotPath){Save-UiScreenshot $panel $ScreenshotPath}
             }else{
             $menu.Show(50,50);[Windows.Forms.Application]::DoEvents()
