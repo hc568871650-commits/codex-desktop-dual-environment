@@ -12,6 +12,7 @@ Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 . "$PSScriptRoot\DailyActions.ps1"
 . "$PSScriptRoot\Diagnostics.ps1"
 . "$PSScriptRoot\Panel.ps1"
+. "$PSScriptRoot\CompletionNotifications.ps1"
 [Windows.Forms.Application]::EnableVisualStyles()
 function Show-Error($ErrorRecord) {if($SmokeTest){throw $ErrorRecord};[void][Windows.Forms.MessageBox]::Show($ErrorRecord.Exception.Message,'Codex 双环境','OK','Warning')}
 try {
@@ -72,7 +73,7 @@ try {
     try{$configHash=[BitConverter]::ToString($hashAlgorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($ConfigPath).ToLowerInvariant()))).Replace('-','')}finally{$hashAlgorithm.Dispose()}
     $eventName='Local\CodexDual.Panel.'+$sid+'.'+$configHash
     $tray=$null
-    $panel=$null;$panelEvent=$null;$configureEvent=$null;$panelTimer=$null;$script:quittingController=$false
+    $panel=$null;$panelEvent=$null;$configureEvent=$null;$panelTimer=$null;$script:quittingController=$false;$script:completionReady=$false
     $mutexName='Local\CodexDual.Controller.'+$sid
     if($SmokeTest){$mutexName+='.Smoke.'+$configHash}
     $mutex=New-Object Threading.Mutex($false,$mutexName);$held=$false
@@ -117,7 +118,7 @@ try {
             }
         })
         $tray.ContextMenuStrip=$menu;$tray.Visible=$true
-        $tray.Add_MouseClick({param($sender,$eventArgs) if($eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left){Invoke-PanelAction {Open-PanelInstance $script:apiInstance}}})
+        $tray.Add_MouseClick({param($sender,$eventArgs) if(-not $script:uiBusy -and $eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left){Show-ControlPanel}})
         $panel=New-Object Windows.Forms.Form
         $version=(Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'version.json') -Raw -Encoding UTF8|ConvertFrom-Json).version
         $panel.Text=$controllerLabel+' · '+$version;$panel.ClientSize=New-Object Drawing.Size(520,450)
@@ -167,11 +168,19 @@ try {
         $panel.Add_FormClosing({param($sender,$e)Save-PanelPosition;if(-not $script:quittingController -and $e.CloseReason -eq 'UserClosing'){$e.Cancel=$true;$panel.Hide()}})
         $openPanelItem=New-Object Windows.Forms.ToolStripMenuItem('打开控制面板');$openPanelItem.Add_Click({$menu.Close();Show-ControlPanel});$menu.Items.Insert(1,$openPanelItem)
         $apiMenu=New-Object Windows.Forms.ToolStripMenuItem('管理 API');$apiMenu.Add_Click({$menu.Close();Show-ControlPanel;Show-ApiManager});$menu.Items.Insert(2,$apiMenu)
+        $completionMenu=New-Object Windows.Forms.ToolStripMenuItem('独立任务完成提示');$completionMenu.CheckOnClick=$true;$menu.Items.Insert(3,$completionMenu)
+        try{Initialize-CompletionNotifications;$script:completionReady=$true;$completionMenu.Checked=$script:completionSettings.enabled}
+        catch{$completionMenu.Enabled=$false;Set-UiMessage '独立通知未能启动，请检查通知设置；其他控制功能可继续使用。'}
+        $completionMenu.Add_Click({
+            try{Set-CompletionNotificationsEnabled $completionMenu.Checked;Set-UiMessage $(if($completionMenu.Checked){'独立任务完成提示已开启。'}else{'独立任务完成提示已暂停。'})}
+            catch{$completionMenu.Checked=$script:completionSettings.enabled;Show-Error $_}
+        })
         $panelEvent=New-Object Threading.EventWaitHandle($false,[Threading.EventResetMode]::AutoReset,$eventName)
         $configureEvent=New-Object Threading.EventWaitHandle($false,[Threading.EventResetMode]::AutoReset,($eventName+'.Configure'))
-        $panelTimer=New-Object Windows.Forms.Timer;$panelTimer.Interval=250;$script:refreshTicks=0;$panelTimer.Add_Tick({
+        $panelTimer=New-Object Windows.Forms.Timer;$panelTimer.Interval=250;$script:refreshTicks=0;$script:completionTicks=0;$panelTimer.Add_Tick({
             if($script:uiBusy){return};if($panelEvent.WaitOne(0)){Show-ControlPanel}
             if($configureEvent.WaitOne(0)){Show-ControlPanel;Show-ApiManager}
+            $script:completionTicks++;if($script:completionReady -and $script:completionTicks -ge 4){$script:completionTicks=0;Update-CompletionNotifications}
             $script:refreshTicks++;if($panel.Visible -and $script:refreshTicks -ge 16){$script:refreshTicks=0;Update-PanelStatus}
         });$panelTimer.Start()
         if($SmokeTest){
@@ -183,22 +192,8 @@ try {
                 $panel.Hide()
                 $mouse=New-Object Windows.Forms.MouseEventArgs([Windows.Forms.MouseButtons]::Left,1,0,0,0)
                 $method=$tray.GetType().GetMethod('OnMouseClick',[Reflection.BindingFlags]'Instance,NonPublic')
-                $script:smokeOpenedInstances=@()
-                $script:smokeOpenError=$false
-                function script:Open-PanelInstance($Instance) {if($script:smokeOpenError){throw 'Tray fixture failure'};$script:smokeOpenedInstances+=,$Instance}
                 [void]$method.Invoke($tray.PSObject.BaseObject,[object[]]@($mouse.PSObject.BaseObject))
-                if($script:smokeOpenedInstances.Count -ne 1 -or -not [object]::ReferenceEquals($script:smokeOpenedInstances[0],$script:apiInstance) -or $panel.Visible -or $menu.Visible){throw 'Left click must open the configured API instance without showing the panel or menu'}
-                $script:uiBusy=$true
-                try{[void]$method.Invoke($tray.PSObject.BaseObject,[object[]]@($mouse.PSObject.BaseObject))}finally{$script:uiBusy=$false}
-                if($script:smokeOpenedInstances.Count -ne 1){throw 'Left click must not reenter while the UI is busy'}
-                $script:smokeOpenError=$true
-                try{[void]$method.Invoke($tray.PSObject.BaseObject,[object[]]@($mouse.PSObject.BaseObject));throw 'Left-click failure was not reported'}
-                catch{if(-not $_.Exception.ToString().Contains('Tray fixture failure')){throw}}
-                finally{$script:smokeOpenError=$false}
-                if($script:uiBusy -or $script:smokeOpenedInstances.Count -ne 1){throw 'Left-click failure must release the busy state without starting another instance'}
-                if($Preview -eq 'main'){Write-Output 'PASS: tray left click targets API instance, guards reentry, and reports failures without launching software'}
-                Show-ControlPanel
-                if(-not $panel.Visible -or $panel.Location -ne $originalPoint){throw 'Panel position retention failed after tray click'}
+                if(-not $panel.Visible -or $menu.Visible -or $panel.Location -ne $originalPoint){throw 'Left click must reveal the stationary panel, not a popup menu'}
                 if($Preview -eq 'api'){Show-ApiManager}elseif($Preview -eq 'diagnostics'){Show-ControllerDiagnostics}elseif($ScreenshotPath){Save-UiScreenshot $panel $ScreenshotPath}
             }else{
             $menu.Show(50,50);[Windows.Forms.Application]::DoEvents()
@@ -206,5 +201,5 @@ try {
             $menu.Close()
             }
         }else{if($Action -in @('panel','configure')){Show-ControlPanel};if($LifecycleObserver){$LifecycleObserver.Invoke('ready-'+$Action)};if($Action -eq 'configure'){Show-ApiManager};[Windows.Forms.Application]::Run($context)}
-    }finally{if($panelTimer){$panelTimer.Stop();$panelTimer.Dispose()};if($panelEvent){$panelEvent.Dispose()};if($configureEvent){$configureEvent.Dispose()};if($panel){$panel.Dispose()};if($tray){$tray.Visible=$false;$tray.Dispose()};if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
+    }finally{if($panelTimer){$panelTimer.Stop();$panelTimer.Dispose()};if($script:completionReady){Dispose-CompletionNotifications};if($panelEvent){$panelEvent.Dispose()};if($configureEvent){$configureEvent.Dispose()};if($panel){$panel.Dispose()};if($tray){$tray.Visible=$false;$tray.Dispose()};if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
 }catch{if($LifecycleObserver){$LifecycleObserver.Invoke('failed-'+$_.Exception.GetType().FullName)};if($Action -eq 'status' -or $SmokeTest){throw};Show-Error $_;exit 1}

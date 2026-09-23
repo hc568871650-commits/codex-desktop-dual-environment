@@ -4,7 +4,7 @@
 
 ## 推荐：使用升级包
 
-1. 将 `CodexDualLauncher-0.4.0-windows.zip` 或 `CodexDualLauncher-0.x-to-0.4.0-upgrade.zip` 解压到一个新文件夹。
+1. 将 `CodexDualLauncher-0.4.1-windows.zip` 或 `CodexDualLauncher-0.x-to-0.4.1-upgrade.zip` 解压到一个新文件夹。
 2. 关闭旧版启动器/控制器窗口。**官方和 API Codex 可以继续运行，不需要退出。**
 3. 双击新文件夹里的 **Start.cmd** 或 **Install.cmd**，自动识别并更新原安装；多个候选目录时才选择。若未能识别自定义位置，可使用 `Upgrade.cmd` 手动选择旧工具目录。不要选择官方 home 或 API 数据目录。
 4. 统一入口完成后会打开原目录的控制器，并补建缺失的控制面板桌面入口；已有数据、密钥和实例 ID 保留。

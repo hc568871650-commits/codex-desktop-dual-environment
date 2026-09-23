@@ -19,6 +19,11 @@ if(-not $installedText.Contains($productionMutex)){throw 'Controller mutex test 
 $installedText=$installedText.Replace($productionMutex,("'Local\CodexDual.HostTest."+[Guid]::NewGuid().ToString('N')+".'"))
 [IO.File]::WriteAllText($installedController,$installedText,(New-Object Text.UTF8Encoding($true)))
 $panelPattern='*'+(Get-Content (Join-Path $install 'version.json') -Raw|ConvertFrom-Json).version+'*'
+$completionLog=Join-Path $config.instances[1].home 'sessions\2001\01\01\rollout-notification.jsonl'
+[void][IO.Directory]::CreateDirectory((Split-Path $completionLog -Parent))
+$meta=@{type='session_meta';payload=@{id=[Guid]::NewGuid().ToString();source='vscode';originator='Codex Desktop'}}|ConvertTo-Json -Depth 5 -Compress
+[IO.File]::WriteAllText($completionLog,$meta+"`n",(New-Object Text.UTF8Encoding($false)))
+$workerStatusPath=Join-Path $install 'state\notifications\worker-status.local.json'
 $original=@(Get-ProcessSnapshot|Where-Object {$_.Name -in @('ChatGPT.exe','Codex.exe')})
 $script:passed=0
 function Check($Value,$Message){if(-not $Value){throw "FAIL: $Message"};$script:passed++;Write-Output "PASS: $Message"}
@@ -74,6 +79,14 @@ try{
     foreach($fixture in $fixtureProcesses){Check (Test-ExpectedProcessAlive $fixture) 'Repeat dual open retains the original fixture process'}
     Check (@(Get-ProcessSnapshot|Where-Object {Test-SamePath $_.Path $fixtureExe}).Count -eq 2) 'Repeat dual open creates no duplicate process'
     Check (@([CodexDualTests.HostAutomation]::Children($element,'BUTTON','常用目录…')).Count -eq 2) 'Each environment exposes its own folder menu'
+    Wait-Condition {(Test-Path -LiteralPath $workerStatusPath) -and (Get-Content -LiteralPath $workerStatusPath -Raw|ConvertFrom-Json).state -eq 'running'} 'notification worker ready'
+    $complete=@{type='event_msg';payload=@{type='task_complete';turn_id=[Guid]::NewGuid().ToString();last_agent_message='DO-NOT-SHOW-PRIVATE-COMPLETION'}}|ConvertTo-Json -Compress
+    [IO.File]::AppendAllText($completionLog,$complete+"`n",(New-Object Text.UTF8Encoding($false)))
+    Wait-Condition {[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 任务完成') -ne 0} 'completion card from worker'
+    $completionHandle=[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 任务完成')
+    Check (-not ([CodexDualTests.HostAutomation]::Describe($process.Id)).Contains('DO-NOT-SHOW-PRIVATE-COMPLETION')) 'Background log event produces correct API card without response body'
+    Click-Button $completionHandle '关闭提示'
+    Wait-Condition {[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 任务完成') -eq 0} 'completion card dismissed'
     Click-Button $element '检查环境'
     Wait-Condition {(Find-Window '环境检查 · 脱敏报告').Count -eq 1} 'redacted diagnostics visible'
     $diagnosticHandle=(Find-Window '环境检查 · 脱敏报告')[0].Handle
@@ -152,6 +165,7 @@ try{
     $element=Get-Element (Find-Window $panelPattern)[0].Handle
     Click-Button $element '退出工具'
     Check ($process.WaitForExit(12000)) 'Exit button ends only test controller'
+    Check ((Get-Content -LiteralPath $workerStatusPath -Raw|ConvertFrom-Json).state -eq 'stopped') 'Controller exit stops its notification worker cleanly'
     $after=Get-ProcessSnapshot
     Check (@($original|Where-Object {$saved=$_;@($after|Where-Object {Test-ProcessIdentity $saved $_}).Count -ne 1}).Count -eq 0) 'Original Codex processes retained throughout EXE UI test'
 }catch{if($process -and -not $process.HasExited){Write-Output ([CodexDualTests.HostAutomation]::Describe($process.Id))};throw}

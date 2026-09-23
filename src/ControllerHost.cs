@@ -13,6 +13,8 @@ class ControllerHost {
   } catch { /* Diagnostics must not prevent startup, including read-only installations. */ }
  }
  [STAThread] static void Main(string[] args) {
+  // A launcher may inherit PowerShell 7 module paths; this host embeds 5.1.
+  Environment.SetEnvironmentVariable("PSModulePath",null);
   string root=AppDomain.CurrentDomain.BaseDirectory;
   tracePath=Path.Combine(root,"state","controller-startup.log");
   Trace("host-start");

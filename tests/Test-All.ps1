@@ -7,6 +7,7 @@ $checks=@(
     @{file='Test-Core.ps1';args=@()},@{file='Test-Instances.ps1';args=@('-Integration')},
     @{file='Test-Install.ps1';args=@()},@{file='Test-Upgrade.ps1';args=@()},@{file='Test-Setup.ps1';args=@()},
     @{file='Test-Experience.ps1';args=@()},@{file='Test-DailyActions.ps1';args=@()},@{file='Test-Diagnostics.ps1';args=@()},@{file='Test-ExitUi.ps1';args=@()},
+    @{file='Test-CompletionMonitor.ps1';args=@()},@{file='Test-CompletionNotifications.ps1';args=@()},
     @{file='Test-Controller.ps1';args=@()},@{file='Test-Host.ps1';args=@()}
 )
 if($IncludeDesktop){$checks+=@(@{file='Test-Desktop.ps1';args=@('-RunIsolatedDesktop','-CleanupFixtures')})}

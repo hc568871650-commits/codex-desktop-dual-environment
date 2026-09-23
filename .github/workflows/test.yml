@@ -27,6 +27,8 @@ jobs:
           ./tests/Test-Experience.ps1
           ./tests/Test-DailyActions.ps1
           ./tests/Test-Diagnostics.ps1
+          ./tests/Test-CompletionMonitor.ps1
+          ./tests/Test-CompletionNotifications.ps1
       - name: Test compiled controller interactions
         shell: powershell
         run: ./tests/Test-Host.ps1

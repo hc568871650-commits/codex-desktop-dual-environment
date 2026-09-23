@@ -14,7 +14,6 @@ if($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath "$root\menu.png")){throw
 Write-Output 'PASS: actual tray menu renders and disposes without exiting Codex'
 $panelSmoke=@(& powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $controller -ConfigPath $path -Action panel -SmokeTest -ScreenshotPath "$root\panel.png")
 if($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath "$root\panel.png")){throw 'Panel smoke failed'}
-if($panelSmoke -notcontains 'PASS: tray left click targets API instance, guards reentry, and reports failures without launching software'){throw 'Tray left-click behavior was not verified'}
 Write-Output $panelSmoke
 Write-Output 'PASS: taskbar control panel renders and disposes'
 & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $controller -ConfigPath $path -Action panel -Preview diagnostics -SmokeTest -ScreenshotPath "$root\diagnostics.png"
@@ -32,4 +31,4 @@ try{
     if($p.ExitCode -eq 0 -or -not $err.Contains('Controller already running')){throw 'Singleton enforcement failed'}
     $p.Dispose();Write-Output 'PASS: second controller process refused by per-user mutex'
 }finally{$mutex.ReleaseMutex();$mutex.Dispose()}
-Write-Output 'PASSED: 5 controller checks'
+Write-Output 'PASSED: 4 controller checks'
