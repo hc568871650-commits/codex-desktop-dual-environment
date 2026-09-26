@@ -12,9 +12,18 @@ namespace CodexDualTests {
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h,StringBuilder text,int count);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr h);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+  public static bool IsMinimized(long handle) { return IsIconic(new IntPtr(handle)); }
   [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h,uint msg,IntPtr w,IntPtr l);
   [DllImport("user32.dll")] static extern IntPtr GetDlgItem(IntPtr h,int id);
   [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr h,uint msg,IntPtr w,IntPtr l,uint flags,uint timeout,out IntPtr result);
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr SendMessageTimeout(IntPtr h,uint msg,IntPtr w,StringBuilder text,uint flags,uint timeout,out IntPtr result);
+  public static string ReadText(long handle) {
+   var text=new StringBuilder(16384);IntPtr result;
+   // GetWindowText cannot reliably retrieve another process's updated EDIT text.
+   SendMessageTimeout(new IntPtr(handle),0xD,new IntPtr(text.Capacity),text,2,500,out result);
+   return text.ToString();
+  }
   public static bool Responds(long handle) {IntPtr result;return SendMessageTimeout(new IntPtr(handle),0,IntPtr.Zero,IntPtr.Zero,2,500,out result)!=IntPtr.Zero;}
   public static long FindDialog(int pid,string title) {
    long found=0;
@@ -52,7 +61,7 @@ namespace CodexDualTests {
    var result=new StringBuilder();
    EnumWindows((h,p)=>{int owner;GetWindowThreadProcessId(h,out owner);if(owner!=pid)return true;
     var name=new StringBuilder(512);GetWindowText(h,name,512);result.AppendLine("Window "+h+" visible="+IsWindowVisible(h)+" enabled="+IsWindowEnabled(h)+" "+name);
-    EnumChildWindows(h,(child,ignored)=>{var text=new StringBuilder(512);GetWindowText(child,text,512);if(text.Length>0)result.AppendLine("  "+text);return true;},IntPtr.Zero);return true;
+    EnumChildWindows(h,(child,ignored)=>{var text=ReadText(child.ToInt64());if(text.Length>0)result.AppendLine("  "+text);return true;},IntPtr.Zero);return true;
    },IntPtr.Zero);return result.ToString();
   }
  }

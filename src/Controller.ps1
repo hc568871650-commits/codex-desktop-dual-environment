@@ -13,6 +13,7 @@ Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 . "$PSScriptRoot\Diagnostics.ps1"
 . "$PSScriptRoot\Panel.ps1"
 . "$PSScriptRoot\CompletionNotifications.ps1"
+. "$PSScriptRoot\TrayMenu.ps1"
 [Windows.Forms.Application]::EnableVisualStyles()
 function Show-Error($ErrorRecord) {if($SmokeTest){throw $ErrorRecord};[void][Windows.Forms.MessageBox]::Show($ErrorRecord.Exception.Message,'Codex 双环境','OK','Warning')}
 try {
@@ -33,6 +34,9 @@ try {
         $windows=@(Get-InstanceWindows $instance $process | Where-Object {$_.Visible})
         for($retry=0;$windows.Count -eq 0 -and $retry -lt 10;$retry++){Start-Sleep -Milliseconds 300;$windows=@(Get-InstanceWindows $instance $process | Where-Object {$_.Visible})}
         if($windows.Count -eq 0){throw '已确认实例运行，但应用尚未原生显示主窗口。不会强行显示隐藏窗口；请从原生托盘恢复。'}
+        Complete-InstanceOpen $instance $process $windows
+    }
+    function Complete-InstanceOpen($instance,$process,$windows) {
         $selected=$windows[0]
         if($windows.Count -gt 1) {
             $dialog=New-Object Windows.Forms.Form;$dialog.Text='选择要显示的窗口';$dialog.Size=New-Object Drawing.Size(650,300);$dialog.StartPosition='CenterScreen'
@@ -73,6 +77,7 @@ try {
     try{$configHash=[BitConverter]::ToString($hashAlgorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($ConfigPath).ToLowerInvariant()))).Replace('-','')}finally{$hashAlgorithm.Dispose()}
     $eventName='Local\CodexDual.Panel.'+$sid+'.'+$configHash
     $tray=$null
+    $script:statusWork=$null;$script:openWork=$null
     $panel=$null;$panelEvent=$null;$configureEvent=$null;$panelTimer=$null;$script:quittingController=$false;$script:completionReady=$false
     $mutexName='Local\CodexDual.Controller.'+$sid
     if($SmokeTest){$mutexName+='.Smoke.'+$configHash}
@@ -88,8 +93,12 @@ try {
         if(Test-Path -LiteralPath $iconPath){$tray.Icon=New-Object Drawing.Icon($iconPath)}else{$tray.Icon=[Drawing.SystemIcons]::Application}
         $controllerLabel=[string](Get-ObjectValue $config 'displayName' 'Codex 双环境')
         if($controllerLabel.Length -gt 63){$controllerLabel=$controllerLabel.Substring(0,63)}
-        $tray.Text=$controllerLabel;$menu=New-Object Windows.Forms.ContextMenuStrip
-        $script:uiBusy=$false;$script:positionInitialized=$false;$script:apiDialog=$null
+        $tray.Text=$controllerLabel;$menu=New-Object CodexDual.QuietMenu
+        $script:uiBusy=$false;$script:openBusy=$false;$script:positionInitialized=$false;$script:apiDialog=$null
+        $script:statusWork=New-Object CodexDual.BackgroundWork
+        $script:openWork=New-Object CodexDual.BackgroundWork
+        $script:workCode=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'ControllerWork.ps1'))
+        $script:statusCache=@{};$script:statusRequested=[DateTime]::MinValue
         $script:apiInstance=@($config.instances|Where-Object {$_.role -eq 'api'})[0]
         $script:openMenus=@{};$script:closeMenus=@{};$script:instanceNames=@{}
         [void]$menu.Items.Add($controllerLabel);$menu.Items[0].Enabled=$false
@@ -109,65 +118,72 @@ try {
             $entry.Add_Click({param($sender,$eventArgs) $sender.Owner.Close();$target=$sender.Tag;Invoke-PanelAction {Close-Instance @($config.instances | Where-Object {$_.role -eq $target})[0]}})
         }
         [void]$menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))
-        $exitItem=$menu.Items.Add('退出控制器');$exitItem.Add_Click({$script:quittingController=$true;$context.ExitThread()})
+        $exitItem=$menu.Items.Add('退出控制器');$exitItem.Add_Click({if($script:openBusy){Show-ControlPanel;return};$script:quittingController=$true;$context.ExitThread()})
         $menu.Add_Opening({param($sender,$e)
-            if($script:uiBusy){$e.Cancel=$true;return}
-            foreach($instance in $config.instances){$prefix=(Get-InstanceDisplayName $instance (Read-ControllerPreferences $config)).Replace('&','&&')
-                try{$s=Get-InstanceStatus $config $instance;$labels[$instance.role].Text=$prefix+'：'+$s.Reason}
-                catch{$labels[$instance.role].Text=$prefix+'：状态未知';$labels[$instance.role].ToolTipText=$_.Exception.Message}
-            }
+            Update-PanelStatus
         })
         $tray.ContextMenuStrip=$menu;$tray.Visible=$true
-        $tray.Add_MouseClick({param($sender,$eventArgs) if(-not $script:uiBusy -and $eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left){Show-ControlPanel}})
-        $panel=New-Object Windows.Forms.Form
+        $tray.Add_MouseClick({param($sender,$eventArgs) if($eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left){Show-ControlPanel}})
+        $panel=New-Object CodexDual.ShellForm
         $version=(Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'version.json') -Raw -Encoding UTF8|ConvertFrom-Json).version
-        $panel.Text=$controllerLabel+' · '+$version;$panel.ClientSize=New-Object Drawing.Size(520,450)
+        $panel.Text=$controllerLabel+' · '+$version;$panel.ClientSize=New-Object Drawing.Size(600,526)
         $panel.FormBorderStyle='FixedSingle';$panel.MaximizeBox=$false;$panel.StartPosition='Manual'
         $panel.Icon=$tray.Icon;$panel.Font=New-Object Drawing.Font('Microsoft YaHei UI',10)
-        $panel.BackColor=[Drawing.ColorTranslator]::FromHtml('#F5F7FA')
-        $heading=New-UiLabel $panel '两个窗口，各自工作' 20 16 322 32;$heading.Font=New-Object Drawing.Font('Microsoft YaHei UI',14,[Drawing.FontStyle]::Bold)
-        [void](New-UiButton $panel '同时打开两边' 354 16 146 {Invoke-PanelAction {Open-BothPanelInstances}})
+        $panel.BackColor=[Drawing.ColorTranslator]::FromHtml('#FAFAF9');$panel.ForeColor=[Drawing.ColorTranslator]::FromHtml('#262626')
+        $heading=New-UiLabel $panel 'Codex 双环境' 24 20 340 34;$heading.Font=New-Object Drawing.Font('Microsoft YaHei UI',17,[Drawing.FontStyle]::Bold)
+        $subtitle=New-UiLabel $panel '两个独立窗口，按你的分工协作。' 24 60 400 26;$subtitle.ForeColor=[Drawing.ColorTranslator]::FromHtml('#737373')
+        $bothButton=New-UiButton $panel '同时打开两边' 428 27 148 {Invoke-PanelAction {Open-BothPanelInstances}};$bothButton.Primary=$true;$bothButton.Height=38
         $panelLabels=@{}
         foreach($role in @('official','api')){
-            $x=if($role -eq 'official'){20}else{266}
-            $card=New-Object Windows.Forms.Panel;$card.SetBounds($x,58,234,164);$card.BackColor=[Drawing.Color]::White;$panel.Controls.Add($card)
-            $name=New-UiLabel $card '' 12 10 210 25;$name.AutoEllipsis=$true;$name.Font=New-Object Drawing.Font('Microsoft YaHei UI',11,[Drawing.FontStyle]::Bold);$script:instanceNames[$role]=$name
-            $label=New-UiLabel $card '读取状态…' 12 38 212 25;$label.AutoEllipsis=$true;$panelLabels[$role]=$label
-            $button=New-UiButton $card '打开' 10 78 64 {param($sender,$e) $target=$sender.Tag;Invoke-PanelAction {Open-PanelInstance @($config.instances|Where-Object {$_.role -eq $target})[0]}};$button.Tag=$role
-            $closeButton=New-UiButton $card '退出…' 80 78 72 {param($sender,$e) $target=$sender.Tag;Invoke-PanelAction {Close-Instance @($config.instances|Where-Object {$_.role -eq $target})[0]}};$closeButton.Tag=$role
-            $rename=New-UiButton $card '改名' 158 78 64 {param($sender,$e) $target=$sender.Tag;Show-NameDialog @($config.instances|Where-Object {$_.role -eq $target})[0]};$rename.Tag=$role
-            $folders=New-UiButton $card '常用目录…' 10 120 212 {param($sender,$e) $target=$sender.Tag;Show-InstanceDirectoryMenu @($config.instances|Where-Object {$_.role -eq $target})[0] $sender};$folders.Tag=$role
+            $x=if($role -eq 'official'){24}else{308}
+            $card=New-Object CodexDual.Surface;$card.SetBounds($x,104,268,186);$panel.Controls.Add($card)
+            $name=New-UiLabel $card '' 16 16 236 28;$name.AutoEllipsis=$true;$name.Font=New-Object Drawing.Font('Microsoft YaHei UI',12,[Drawing.FontStyle]::Bold);$script:instanceNames[$role]=$name
+            $label=New-UiLabel $card '正在检查状态…' 16 49 238 26;$label.AutoEllipsis=$true;$label.ForeColor=[Drawing.ColorTranslator]::FromHtml('#737373');$panelLabels[$role]=$label
+            $button=New-UiButton $card '打开' 14 91 80 {param($sender,$e) $target=$sender.Tag;Invoke-PanelAction {Open-PanelInstance @($config.instances|Where-Object {$_.role -eq $target})[0]}};$button.Tag=$role;$button.Primary=$true
+            $closeButton=New-UiButton $card '退出…' 100 91 78 {param($sender,$e) $target=$sender.Tag;Invoke-PanelAction {Close-Instance @($config.instances|Where-Object {$_.role -eq $target})[0]}};$closeButton.Tag=$role
+            $rename=New-UiButton $card '改名' 184 91 70 {param($sender,$e) $target=$sender.Tag;Show-NameDialog @($config.instances|Where-Object {$_.role -eq $target})[0]};$rename.Tag=$role
+            $folders=New-UiButton $card '常用目录…' 14 138 240 {param($sender,$e) $target=$sender.Tag;Show-InstanceDirectoryMenu @($config.instances|Where-Object {$_.role -eq $target})[0] $sender};$folders.Tag=$role
         }
-        $script:apiSummary=New-UiLabel $panel 'API 渠道' 20 236 480 26
-        $script:profilePicker=New-Object Windows.Forms.ComboBox;$script:profilePicker.DropDownStyle='DropDownList';$script:profilePicker.SetBounds(20,266,224,30);$panel.Controls.Add($script:profilePicker)
-        $script:applyButton=New-UiButton $panel '应用渠道' 254 265 112 {Invoke-PanelAction {Apply-SelectedProfile $script:profilePicker.SelectedItem $false}}
-        [void](New-UiButton $panel '管理 API' 376 265 124 {Show-ApiManager})
-        $script:feedback=New-UiLabel $panel '关闭面板收起到托盘；窗口位置会记住。' 20 309 480 76
-        $startup=New-Object Windows.Forms.CheckBox;$startup.Text='登录时自动打开控制面板';$startup.SetBounds(20,401,272,28);$panel.Controls.Add($startup)
+        $script:apiSummary=New-UiLabel $panel 'API 渠道' 24 311 552 26
+        $script:profilePicker=New-Object Windows.Forms.ComboBox;$script:profilePicker.DropDownStyle='DropDownList';$script:profilePicker.FlatStyle='Flat';$script:profilePicker.SetBounds(24,348,292,30);$panel.Controls.Add($script:profilePicker)
+        $script:applyButton=New-UiButton $panel '应用渠道' 328 346 116 {Invoke-PanelAction {Apply-SelectedProfile $script:profilePicker.SelectedItem $false}}
+        [void](New-UiButton $panel '管理 API' 456 346 120 {if(-not $script:openBusy){Show-ApiManager}})
+        $script:feedback=New-UiLabel $panel '关闭面板即可收起到托盘。' 24 397 552 64;$script:feedback.ForeColor=[Drawing.ColorTranslator]::FromHtml('#737373')
+        $startup=New-Object Windows.Forms.CheckBox;$startup.Text='登录时打开控制面板';$startup.SetBounds(24,480,268,28);$panel.Controls.Add($startup)
         $toolRoot=Split-Path $PSScriptRoot -Parent
         $startup.Checked=[bool](Repair-ControllerAutoStart $toolRoot $ConfigPath)
         $startup.Add_Click({
             try{Set-ControllerAutoStart $toolRoot $ConfigPath $startup.Checked;Set-UiMessage $(if($startup.Checked){'已开启：登录后自动打开控制面板，Codex 仍由你手动打开。'}else{'已关闭控制器自启动。'})}
             catch{$startup.Checked=[bool](Test-ControllerAutoStart $toolRoot $ConfigPath);Show-Error $_}
         })
-        [void](New-UiButton $panel '检查环境' 300 399 96 {Show-ControllerDiagnostics})
-        [void](New-UiButton $panel '退出工具' 404 399 96 {Save-PanelPosition;$script:quittingController=$true;$context.ExitThread()})
+        [void](New-UiButton $panel '检查环境' 368 477 100 {Show-ControllerDiagnostics})
+        [void](New-UiButton $panel '退出工具' 476 477 100 {if($script:openBusy){Set-UiMessage '请等待窗口打开操作结束，再退出工具。';return};Save-PanelPosition;$script:quittingController=$true;$context.ExitThread()})
+        $panel.AddTitleBar()
         function Update-PanelStatus {
+            if($script:statusWork.Completed){
+                try{foreach($result in $script:statusWork.Take()){$script:statusCache[$result.Role]=$result}}
+                catch{$script:statusCache.Clear()}
+            }
             foreach($instance in $config.instances){
                 $kind=if($instance.role -eq 'official'){'官方订阅'}else{'API'}
-                try{
-                    $s=Get-InstanceStatus $config $instance
-                    $panelLabels[$instance.role].Text=$kind+' · '+$(if($s.State -eq 'Running'){'已运行'}else{'未启动'})
+                $s=$script:statusCache[$instance.role]
+                if($s){
+                    $panelLabels[$instance.role].Text=$kind+' · '+$(switch($s.State){'Running'{'已运行'};'Stopped'{'未启动'};default{'状态未知'}})
                     $pending=Get-ObjectValue $script:preferences 'pendingApi' $null
                     if($instance.role -eq 'api' -and $pending -and $s.State -eq 'Running' -and $s.Process.Id -eq $pending.pid -and $s.Process.Started -eq $pending.started){$panelLabels[$instance.role].Text='API · 已运行，配置待重启'}
-                }catch{$panelLabels[$instance.role].Text=$kind+' · 状态未知'}
+                    $labels[$instance.role].Text=(Get-InstanceDisplayName $instance $script:preferences).Replace('&','&&')+'：'+$s.Reason
+                }else{$panelLabels[$instance.role].Text=$kind+' · 正在检查';$labels[$instance.role].Text=$panelLabels[$instance.role].Text}
+            }
+            if(-not $script:statusWork.Busy -and ([DateTime]::UtcNow-$script:statusRequested).TotalSeconds -ge 2){
+                $script:statusRequested=[DateTime]::UtcNow
+                $script:statusWork.Start($script:workCode,[object[]]@($PSScriptRoot,$ConfigPath,'status',[string[]]@()))
             }
         }
         Update-PanelNames;Update-ApiSummary
         $panel.Add_ResizeEnd({Save-PanelPosition})
         $panel.Add_FormClosing({param($sender,$e)Save-PanelPosition;if(-not $script:quittingController -and $e.CloseReason -eq 'UserClosing'){$e.Cancel=$true;$panel.Hide()}})
         $openPanelItem=New-Object Windows.Forms.ToolStripMenuItem('打开控制面板');$openPanelItem.Add_Click({$menu.Close();Show-ControlPanel});$menu.Items.Insert(1,$openPanelItem)
-        $apiMenu=New-Object Windows.Forms.ToolStripMenuItem('管理 API');$apiMenu.Add_Click({$menu.Close();Show-ControlPanel;Show-ApiManager});$menu.Items.Insert(2,$apiMenu)
+        $apiMenu=New-Object Windows.Forms.ToolStripMenuItem('管理 API');$apiMenu.Add_Click({$menu.Close();Show-ControlPanel;if(-not $script:openBusy){Show-ApiManager}});$menu.Items.Insert(2,$apiMenu)
         $completionMenu=New-Object Windows.Forms.ToolStripMenuItem('独立任务完成提示');$completionMenu.CheckOnClick=$true;$menu.Items.Insert(3,$completionMenu)
         try{Initialize-CompletionNotifications;$script:completionReady=$true;$completionMenu.Checked=$script:completionSettings.enabled}
         catch{$completionMenu.Enabled=$false;Set-UiMessage '独立通知未能启动，请检查通知设置；其他控制功能可继续使用。'}
@@ -175,13 +191,15 @@ try {
             try{Set-CompletionNotificationsEnabled $completionMenu.Checked;Set-UiMessage $(if($completionMenu.Checked){'独立任务完成提示已开启。'}else{'独立任务完成提示已暂停。'})}
             catch{$completionMenu.Checked=$script:completionSettings.enabled;Show-Error $_}
         })
+        Initialize-QuickMenu
         $panelEvent=New-Object Threading.EventWaitHandle($false,[Threading.EventResetMode]::AutoReset,$eventName)
         $configureEvent=New-Object Threading.EventWaitHandle($false,[Threading.EventResetMode]::AutoReset,($eventName+'.Configure'))
-        $panelTimer=New-Object Windows.Forms.Timer;$panelTimer.Interval=250;$script:refreshTicks=0;$script:completionTicks=0;$panelTimer.Add_Tick({
+        $panelTimer=New-Object Windows.Forms.Timer;$panelTimer.Interval=50;$script:refreshTicks=0;$script:completionTicks=0;$panelTimer.Add_Tick({
             if($script:uiBusy){return};if($panelEvent.WaitOne(0)){Show-ControlPanel}
-            if($configureEvent.WaitOne(0)){Show-ControlPanel;Show-ApiManager}
-            $script:completionTicks++;if($script:completionReady -and $script:completionTicks -ge 4){$script:completionTicks=0;Update-CompletionNotifications}
-            $script:refreshTicks++;if($panel.Visible -and $script:refreshTicks -ge 16){$script:refreshTicks=0;Update-PanelStatus}
+            if(-not $script:openBusy -and $configureEvent.WaitOne(0)){Show-ControlPanel;Show-ApiManager}
+            if($script:openWork.Completed){Receive-PanelOpen}
+            $script:completionTicks++;if($script:completionReady -and $script:completionTicks -ge 20){$script:completionTicks=0;Update-CompletionNotifications}
+            $script:refreshTicks++;if($script:statusWork.Completed -or (($panel.Visible -or $menu.Visible) -and $script:refreshTicks -ge 40)){$script:refreshTicks=0;Update-PanelStatus}
         });$panelTimer.Start()
         if($SmokeTest){
             if($Action -in @('panel','configure')){
@@ -201,5 +219,5 @@ try {
             $menu.Close()
             }
         }else{if($Action -in @('panel','configure')){Show-ControlPanel};if($LifecycleObserver){$LifecycleObserver.Invoke('ready-'+$Action)};if($Action -eq 'configure'){Show-ApiManager};[Windows.Forms.Application]::Run($context)}
-    }finally{if($panelTimer){$panelTimer.Stop();$panelTimer.Dispose()};if($script:completionReady){Dispose-CompletionNotifications};if($panelEvent){$panelEvent.Dispose()};if($configureEvent){$configureEvent.Dispose()};if($panel){$panel.Dispose()};if($tray){$tray.Visible=$false;$tray.Dispose()};if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
+    }finally{if($panelTimer){$panelTimer.Stop();$panelTimer.Dispose()};if($script:statusWork){$script:statusWork.Dispose()};if($script:openWork){$script:openWork.Dispose()};if($script:completionReady){Dispose-CompletionNotifications};if($panelEvent){$panelEvent.Dispose()};if($configureEvent){$configureEvent.Dispose()};if($panel){$panel.Dispose()};if($tray){$tray.Visible=$false;$tray.Dispose()};if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
 }catch{if($LifecycleObserver){$LifecycleObserver.Invoke('failed-'+$_.Exception.GetType().FullName)};if($Action -eq 'status' -or $SmokeTest){throw};Show-Error $_;exit 1}

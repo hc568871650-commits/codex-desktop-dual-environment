@@ -59,6 +59,12 @@ if($Integration){
         Start-Sleep -Milliseconds 800
         $wins=@(Get-InstanceWindows $a $pa)
         Assert ($wins.Count -eq 2) 'Enumerates multiple windows including minimized'
+        $activation=& {
+            function Find-CodexExecutable { param([string]$ExplicitPath) return $exe }
+            function New-CodexStartInfo { throw 'Visible window must not create a secondary launcher' }
+            Request-NativeInstanceActivation $a $pa
+        }
+        Assert ($activation -eq $true) 'Visible fixture activation returns without a secondary launch'
         Assert (@($wins | Where-Object {$_.Title -like 'Internal overlay*'}).Count -eq 0) 'Hidden topmost tool window excluded from restore and close targets'
         [void](Show-InstanceWindow $a $pa $wins[0].Handle)
         Assert (@(Get-InstanceWindows $b $pb).Count -eq 2) 'Locating official leaves API windows present'

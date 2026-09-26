@@ -71,9 +71,11 @@ namespace CodexDual {
    if(!ReadProcessMemory(h,new IntPtr(address),data,size,out read)||read.ToInt64()!=size) throw new InvalidOperationException("Process environment unavailable");
    return data;
   }
-  // Read-only, x64 Windows only. Only CODEX_HOME leaves this method; no credentials are returned or logged.
+  // Read-only, x64 Windows only. Only the two allowlisted routing paths leave these methods.
   // PEB layout is not a public compatibility promise: fail closed on unsupported layout/access.
-  public static string CodexHome(int pid) {
+  public static string CodexHome(int pid) { return ReadEnvironmentPath(pid,"CODEX_HOME"); }
+  public static string ElectronUserData(int pid) { return ReadEnvironmentPath(pid,"CODEX_ELECTRON_USER_DATA_PATH"); }
+  static string ReadEnvironmentPath(int pid,string name) {
    if(IntPtr.Size!=8) throw new NotSupportedException("64-bit PowerShell required");
    IntPtr h=OpenProcess(0x410,false,pid); if(h==IntPtr.Zero) throw new InvalidOperationException("Cannot inspect process");
    try {
@@ -85,7 +87,7 @@ namespace CodexDual {
     var entry=new StringBuilder();
     for(int offset=0;offset<1048576;offset+=2) {
      char c=(char)BitConverter.ToUInt16(Read(h,environment+offset,2),0);
-     if(c=='\0') { if(entry.Length==0) return null; string s=entry.ToString(); entry.Clear(); if(s.StartsWith("CODEX_HOME=",StringComparison.OrdinalIgnoreCase)) return s.Substring(11); }
+     if(c=='\0') { if(entry.Length==0) return null; string s=entry.ToString(); entry.Clear(); if(s.StartsWith(name+"=",StringComparison.OrdinalIgnoreCase)) return s.Substring(name.Length+1); }
      else entry.Append(c);
     }
     throw new InvalidOperationException("Environment limit exceeded");

@@ -1,17 +1,28 @@
 ﻿# UI helpers share the controller runspace. Instance IDs remain the action targets.
 if(-not ('CodexDual.ExitWaitDialog' -as [type])){Add-Type -Path "$PSScriptRoot\ExitWaitDialog.cs" -ReferencedAssemblies System.Windows.Forms,System.Drawing}
+if(-not ('CodexDual.QuietButton' -as [type])){Add-Type -Path "$PSScriptRoot\UiTheme.cs" -ReferencedAssemblies System.Windows.Forms,System.Drawing}
+if(-not ('CodexDual.BackgroundWork' -as [type])){Add-Type -Path "$PSScriptRoot\BackgroundWork.cs" -ReferencedAssemblies System.Management.Automation,System.Windows.Forms}
+function Set-UiTheme($Control) {
+    $Control.BackColor=[Drawing.ColorTranslator]::FromHtml('#FAFAF9')
+    $Control.ForeColor=[Drawing.ColorTranslator]::FromHtml('#262626')
+    foreach($child in $Control.Controls){
+        if($child -is [Windows.Forms.TextBox] -or $child -is [Windows.Forms.ListBox] -or $child -is [Windows.Forms.ComboBox]){$child.BackColor=[Drawing.Color]::White;$child.ForeColor=$Control.ForeColor}
+        elseif($child -isnot [Windows.Forms.Button]){Set-UiTheme $child}
+    }
+}
 function New-UiLabel($Parent,[string]$Text,[int]$X,[int]$Y,[int]$Width,[int]$Height=26) {
     $label=New-Object Windows.Forms.Label;$label.Text=$Text;$label.UseMnemonic=$false;$label.SetBounds($X,$Y,$Width,$Height);$Parent.Controls.Add($label);return $label
 }
 function New-UiButton($Parent,[string]$Text,[int]$X,[int]$Y,[int]$Width,[scriptblock]$Click) {
-    $button=New-Object Windows.Forms.Button;$button.Text=$Text;$button.SetBounds($X,$Y,$Width,32);$button.Add_Click($Click);$Parent.Controls.Add($button);return $button
+    $button=New-Object CodexDual.QuietButton;$button.Text=$Text;$button.SetBounds($X,$Y,$Width,32);$button.Add_Click($Click);$Parent.Controls.Add($button);return $button
 }
 function New-UiTextBox($Parent,[int]$X,[int]$Y,[int]$Width) {
     $box=New-Object Windows.Forms.TextBox;$box.SetBounds($X,$Y,$Width,28);$Parent.Controls.Add($box);return $box
 }
 function Set-UiMessage([string]$Message) {$script:feedback.Text=$Message}
+$script:openBusy=$false
 function Invoke-PanelAction([scriptblock]$Action) {
-    if($script:uiBusy){return}
+    if($script:uiBusy -or $script:openBusy){return}
     $script:uiBusy=$true;$panel.UseWaitCursor=$true
     try{& $Action}catch{Set-UiMessage $_.Exception.Message;Show-Error $_}
     finally{$panel.UseWaitCursor=$false;$script:uiBusy=$false;Update-PanelStatus}
@@ -70,6 +81,7 @@ function Show-NameDialog($Instance) {
         try{[void](Set-InstanceDisplayName $config $Instance '' -Reset);Update-PanelNames;$dialog.DialogResult='OK'}catch{Show-Error $_}
     })
     $cancel=New-UiButton $dialog '取消' 244 104 126 {$dialog.DialogResult='Cancel'};$dialog.AcceptButton=$ok;$dialog.CancelButton=$cancel
+    Set-UiTheme $dialog
     try{[void]$dialog.ShowDialog($panel)}finally{$dialog.Dispose()}
 }
 function Update-ApiSummary {
@@ -201,6 +213,7 @@ function Show-ApiManager {
     })
     [void](New-UiLabel $backupPage '快照仅供当前 Windows 用户解密。恢复前会另存一份备份。' 18 432 588 64)
     $script:apiDialog=$dialog
+    Set-UiTheme $dialog
     try{Refresh-ChannelList '';Refresh-BackupList
         if($SmokeTest -and $Preview -eq 'api'){$dialog.Show();[Windows.Forms.Application]::DoEvents();Save-UiScreenshot $dialog $ScreenshotPath}
         else{[void]$dialog.ShowDialog($panel)}
@@ -215,28 +228,60 @@ function Get-OpenOutcomeText([string]$Outcome) {
     }
 }
 function Open-PanelInstance($Instance) {
-    $outcome=Open-Instance $Instance
-    Set-UiMessage ((Get-InstanceDisplayName $Instance $script:preferences)+'：'+(Get-OpenOutcomeText $outcome))
+    Start-PanelOpen @($Instance.role)
 }
 function Open-BothPanelInstances {
-    Set-UiMessage '正在分别打开两边；已有实例将找回窗口。';$panel.Refresh()
-    $results=@(Invoke-DualOpen $config {param($instance) Open-Instance $instance})
-    $lines=@(foreach($result in $results){
-        $instance=@($config.instances|Where-Object {$_.role -eq $result.Role})[0]
-        (Get-InstanceDisplayName $instance $script:preferences)+'：'+(Get-OpenOutcomeText $result.Outcome)
-    })
-    Set-UiMessage ($lines -join [Environment]::NewLine)
-    $failures=@($results|Where-Object {$_.Outcome -eq 'Failed'})
-    if($failures.Count){
-        $detail=@(foreach($failure in $failures){
-            $instance=@($config.instances|Where-Object {$_.role -eq $failure.Role})[0]
-            (Get-InstanceDisplayName $instance $script:preferences)+'：'+$failure.Error
-        }) -join [Environment]::NewLine
-        [void][Windows.Forms.MessageBox]::Show($panel,$detail,'部分环境未能打开','OK','Warning')
+    Start-PanelOpen @('official','api')
+}
+function Start-PanelOpen([string[]]$Roles,[string]$ThreadId='') {
+    if($script:openBusy){return}
+    Set-PanelOpenBusy $true
+    Set-UiMessage '正在打开窗口… 面板仍可移动或收起。'
+    $operation=if($ThreadId){'task'}else{'open'}
+    try{$script:openWork.Start($script:workCode,[object[]]@($PSScriptRoot,$ConfigPath,$operation,$Roles,$ThreadId))}
+    catch{Set-PanelOpenBusy $false;throw}
+}
+function Set-PanelOpenBusy([bool]$Busy) {
+    $script:openBusy=$Busy
+    if($Busy){
+        $script:disabledForOpen=@()
+        $controls=@($panel.Controls)+@($panel.Controls|Where-Object {$_ -is [CodexDual.Surface]}|ForEach-Object {$_.Controls})
+        foreach($control in $controls){if($control -is [Windows.Forms.Button] -and $control.Enabled){$script:disabledForOpen+=,$control;$control.Enabled=$false}}
+    }else{
+        foreach($control in $script:disabledForOpen){if(-not $control.IsDisposed){$control.Enabled=$true}}
+        $script:disabledForOpen=@()
     }
+    foreach($entry in @($script:openMenus.Values)+@($script:closeMenus.Values)){$entry.Enabled=-not $Busy}
+}
+function Receive-PanelOpen {
+    if(-not $script:openWork.Completed){return}
+    try{
+        $results=$script:openWork.Take();$lines=@();$needsAttention=$false
+        foreach($result in $results){
+            $instance=@($config.instances|Where-Object {$_.role -eq $result.Role})[0]
+            $name=Get-InstanceDisplayName $instance $script:preferences
+            if($result.Error){$lines+=($name+'：'+$result.Error);$needsAttention=$true;continue}
+            try{
+                $windows=@($result.Windows)
+                if((Get-ObjectValue $result 'TaskOutcome' '') -eq 'Requested'){
+                    $focused=@($windows|Where-Object {$_.Handle -eq [CodexDual.Native]::Foreground()})
+                    if($focused.Count -eq 1){$windows=$focused}
+                }
+                $outcome=Complete-InstanceOpen $instance $result.Process $windows
+                $detail=Get-OpenOutcomeText $outcome
+                if((Get-ObjectValue $result 'TaskOutcome' '') -eq 'Requested'){$detail+='；已向此环境发送任务定位请求'}
+                elseif((Get-ObjectValue $result 'TaskOutcome' '') -eq 'Unsupported'){$detail+='；此程序入口未确认支持任务链接，请在该端选择任务';$needsAttention=$true}
+                $lines+=($name+'：'+$detail)
+            }
+            catch{$lines+=($name+'：'+$_.Exception.Message);$needsAttention=$true}
+        }
+        Set-UiMessage ($lines -join [Environment]::NewLine)
+        if($needsAttention -and -not $panel.Visible){Show-ControlPanel}
+    }catch{Set-UiMessage $_.Exception.Message;if(-not $panel.Visible){Show-ControlPanel}}
+    finally{Set-PanelOpenBusy $false;$script:statusRequested=[DateTime]::MinValue;Update-PanelStatus}
 }
 function Show-InstanceDirectoryMenu($Instance,$Button) {
-    $folders=New-Object Windows.Forms.ContextMenuStrip
+    $folders=New-Object CodexDual.QuietMenu
     foreach($entry in @(@('projects','项目目录'),@('projectless','无项目任务目录'),@('home','配置目录'))){
         $item=$folders.Items.Add($entry[1]);$item.Tag=@{Instance=$Instance;Kind=$entry[0]}
         $item.Add_Click({param($sender,$eventArgs)
@@ -250,8 +295,7 @@ function Show-InstanceDirectoryMenu($Instance,$Button) {
     $folders.Show($Button,(New-Object Drawing.Point(0,$Button.Height)))
 }
 function Show-ControllerDiagnostics {
-    try{$report=Get-ControllerDiagnostics $config (Split-Path $PSScriptRoot -Parent);$reportText=ConvertTo-ControllerDiagnosticText $report}
-    catch{Show-Error $_;return}
+    $report=$null;$reportText='正在检查环境…'
     $dialog=New-Object Windows.Forms.Form;$dialog.Text='环境检查 · 脱敏报告';$dialog.ClientSize=New-Object Drawing.Size(720,510);$dialog.StartPosition='CenterParent';$dialog.Font=$panel.Font
     $dialog.MinimumSize=New-Object Drawing.Size(650,440)
     $bar=New-Object Windows.Forms.Panel;$bar.Dock='Bottom';$bar.Height=56;$dialog.Controls.Add($bar)
@@ -262,13 +306,25 @@ function Show-ControllerDiagnostics {
     };$copy.Anchor='Top,Right'
     $save=New-UiButton $bar '导出报告…' 482 12 112 {
         $picker=New-Object Windows.Forms.SaveFileDialog;$picker.Filter='文本报告 (*.txt)|*.txt';$picker.FileName='CodexDual-diagnostics-'+[DateTime]::Now.ToString('yyyyMMdd-HHmmss')+'.txt';$picker.OverwritePrompt=$false
-        try{if($picker.ShowDialog($dialog) -eq 'OK'){Export-ControllerDiagnostics $report $picker.FileName;$hint.Text='脱敏报告已保存。'}}catch{$hint.Text='保存失败，请选择一个未使用的文件名。'}finally{$picker.Dispose()}
+        try{if($picker.ShowDialog($dialog) -eq 'OK'){Export-ControllerDiagnostics $diagnosticState.report $picker.FileName;$hint.Text='脱敏报告已保存。'}}catch{$hint.Text='保存失败，请选择一个未使用的文件名。'}finally{$picker.Dispose()}
     };$save.Anchor='Top,Right'
     $close=New-UiButton $bar '关闭' 606 12 100 {$dialog.Close()};$close.Anchor='Top,Right';$dialog.CancelButton=$close
+    Set-UiTheme $dialog
+    $copy.Enabled=$false;$save.Enabled=$false
+    $diagnosticWork=New-Object CodexDual.BackgroundWork
+    $diagnosticState=@{report=$null;done=$false;error=$null}
+    # Keep report state in a shared object because timer scriptblocks have their own scope.
     try{
-        if($SmokeTest -and $Preview -eq 'diagnostics'){$dialog.Show();[Windows.Forms.Application]::DoEvents();Save-UiScreenshot $dialog $ScreenshotPath}
+        $diagnosticWork.Start($script:workCode,[object[]]@($PSScriptRoot,$ConfigPath,'diagnostics',[string[]]@()))
+        $diagnosticWork.PresentReport($dialog,$text,$copy,$save,$diagnosticState)
+        if($SmokeTest -and $Preview -eq 'diagnostics'){
+            $dialog.Show();$deadline=[DateTime]::UtcNow.AddSeconds(15)
+            while(-not $diagnosticState.done -and [DateTime]::UtcNow -lt $deadline){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 10}
+            if(-not $diagnosticState.report){throw 'Diagnostics did not complete'}
+            Save-UiScreenshot $dialog $ScreenshotPath
+        }
         else{[void]$dialog.ShowDialog($panel)}
-    }finally{$dialog.Dispose()}
+    }finally{$diagnosticWork.Dispose();$dialog.Dispose()}
 }
 function Save-UiScreenshot($Form,[string]$Path) {
     $bmp=New-Object Drawing.Bitmap($Form.Width,$Form.Height)

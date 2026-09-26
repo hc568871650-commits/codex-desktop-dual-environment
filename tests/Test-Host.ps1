@@ -53,6 +53,13 @@ try{
     try{Check ($second.WaitForExit(12000) -and $second.ExitCode -eq 0) 'Second EXE launch forwards to existing controller'}finally{$second.Dispose()}
     Wait-Condition {(Find-Window $panelPattern).Count -eq 1} 'main panel visible'
     $main=(Find-Window $panelPattern)[0];$element=Get-Element $main.Handle
+    Check (@([CodexDualTests.HostAutomation]::Children($element,'BUTTON','×')).Count -eq 1) 'Custom title bar exposes close-to-tray control'
+    Click-Button $element '−'
+    Wait-Condition {[CodexDualTests.HostAutomation]::IsMinimized($main.Handle)} 'custom minimize control'
+    $restoreEvent=[Threading.EventWaitHandle]::OpenExisting($eventName)
+    try{[void]$restoreEvent.Set()}finally{$restoreEvent.Dispose()}
+    Wait-Condition {-not [CodexDualTests.HostAutomation]::IsMinimized($main.Handle)} 'minimized panel restored'
+    Check $true 'Custom minimize and panel restore preserve the window'
     # Actual 0.4 controls against two disposable GUI instances, including window selection.
     $officialFixture=$config.instances[0]
     Write-AtomicText (Join-Path $officialFixture.profile 'stubborn.fixture') ''
@@ -85,11 +92,17 @@ try{
     Wait-Condition {[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 任务完成') -ne 0} 'completion card from worker'
     $completionHandle=[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 任务完成')
     Check (-not ([CodexDualTests.HostAutomation]::Describe($process.Id)).Contains('DO-NOT-SHOW-PRIVATE-COMPLETION')) 'Background log event produces correct API card without response body'
-    Click-Button $completionHandle '关闭提示'
+    Click-Button $completionHandle '查看任务'
+    Wait-Condition {(Find-Window '选择要显示的窗口').Count -eq 1} 'completion task opens correct fixture environment'
+    Click-Button (Find-Window '选择要显示的窗口')[0].Handle '显示选中窗口'
+    Wait-Condition {([CodexDualTests.HostAutomation]::Describe($process.Id)).Contains('此程序入口未确认支持任务链接')} 'unsupported fixture reports instance-only fallback'
+    Check ((Get-InstanceStatus $config $config.instances[1]).Process.Id -eq $fixtureProcesses[1].Id) 'Task card falls back to original API fixture without invoking global protocol'
     Wait-Condition {[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 任务完成') -eq 0} 'completion card dismissed'
     Click-Button $element '检查环境'
     Wait-Condition {(Find-Window '环境检查 · 脱敏报告').Count -eq 1} 'redacted diagnostics visible'
     $diagnosticHandle=(Find-Window '环境检查 · 脱敏报告')[0].Handle
+    Check ([CodexDualTests.HostAutomation]::Responds($diagnosticHandle)) 'Diagnostics responds while background report is loading'
+    Wait-Condition {([CodexDualTests.HostAutomation]::Describe($process.Id)).Contains('可分享诊断报告')} 'background diagnostic report ready'
     $reportControls=[CodexDualTests.HostAutomation]::Describe($process.Id)
     Check ($reportControls.Contains('可分享诊断报告') -and -not $reportControls.Contains('fixture-host-no-real-key') -and -not $reportControls.Contains($root)) 'Actual diagnostics dialog renders without fixture secrets or paths'
     Check (@([CodexDualTests.HostAutomation]::Children($diagnosticHandle,'BUTTON','复制报告')).Count -eq 1 -and @([CodexDualTests.HostAutomation]::Children($diagnosticHandle,'BUTTON','导出报告…')).Count -eq 1) 'Diagnostics exposes copy and export controls'
@@ -122,7 +135,7 @@ try{
     [CodexDualTests.HostAutomation]::SetText($visibleEdits[0],'界面夹具')
     [CodexDualTests.HostAutomation]::CloseLikeUser($apiWindow.Handle)
     Wait-Condition {(Find-Window 'API 渠道管理').Count -eq 0} 'API manager closed'
-    [CodexDualTests.HostAutomation]::CloseLikeUser($main.Handle)
+    Click-Button $main.Handle '×'
     Wait-Condition {(Find-Window $panelPattern).Count -eq 0} 'panel hidden to tray'
     Check (-not $process.HasExited) 'Closing panel keeps compiled controller running'
     $again=Start-TestHost ('--config "'+$configPath+'"')

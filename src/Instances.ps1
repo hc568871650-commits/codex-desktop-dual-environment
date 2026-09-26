@@ -190,9 +190,9 @@ function Start-OrFindInstance($Config,$Instance) {
         }
         try{[void][CodexDual.Native]::StartDetached($psi)}finally{$psi.EnvironmentVariables.Remove('CODEX_DUAL_API_KEY')}
         for($i=0;$i -lt 30;$i++) {
-            Start-Sleep -Milliseconds 300
             $status=Get-InstanceStatus $Config $Instance
             if($status.State -eq 'Running'){Save-InstanceRecord $Config $Instance $status.Process;return $status.Process}
+            if($i -lt 29){Start-Sleep -Milliseconds 300}
         }
         throw '启动后未能验证目标实例。不会重试启动；请检查原启动器与目录设置。'
     }
@@ -208,16 +208,23 @@ function Request-NativeInstanceActivation($Instance,$Process) {
     if(-not (Test-SamePath $Process.Path $storeExecutable)){return $false}
     Invoke-InstanceLocked $Instance {
         [void](Assert-CurrentIdentity $Instance $Process)
+        # A visible window can be focused without launching the Store executable again.
+        if (@([CodexDual.Native]::Windows($Process.Id) | Where-Object {$_.Visible}).Count) { return $true }
         $info=New-CodexStartInfo -Executable $Process.Path -OfficialHome $Instance.home
         $info.WorkingDirectory=$Instance.projects
         if($Instance.profile){$info.Arguments='--user-data-dir="'+$Instance.profile+'"'}
+        # External launchers own package activation and credential/environment setup.
+        if ($Instance.launchMode -eq 'external') {
+            $info.FileName = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+            $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $Instance.externalLauncher + '"'
+        }
         $secondaryId=[CodexDual.Native]::StartDetached($info)
         for($attempt=0;$attempt -lt 20;$attempt++){
-            Start-Sleep -Milliseconds 250
             if(-not (Get-Process -Id $secondaryId -ErrorAction SilentlyContinue)){
                 [void](Assert-CurrentIdentity $Instance $Process)
                 return $true
             }
+            if($attempt -lt 19){Start-Sleep -Milliseconds 250}
         }
         throw '原生唤起请求未按预期退出；不会强行显示窗口或重试。请检查此桌面版本的单实例行为。'
     }

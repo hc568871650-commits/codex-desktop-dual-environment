@@ -7,6 +7,7 @@
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot\Instances.ps1"
 . "$PSScriptRoot\CompletionMonitor.ps1"
+. "$PSScriptRoot\CompletionNavigation.ps1"
 if($Epoch -notmatch '^[a-f0-9]{32}$' -or $RunId -notmatch '^[a-f0-9]{32}$'){throw 'Invalid worker identity.'}
 $config=Read-ControllerConfig $ConfigPath
 $root=Get-FullDirectory $StateDirectory;Assert-NoReparsePoint $root
@@ -27,11 +28,11 @@ try {
     $ticks=0
     while(-not (Test-Path -LiteralPath $stop)){
         try{$parent=[Diagnostics.Process]::GetProcessById($ParentProcessId);try{if($parent.StartTime.ToUniversalTime().Ticks -ne $ParentStarted){break}}finally{$parent.Dispose()}}catch{break}
-        $latest=@{}
-        foreach($completion in @(Read-MonitorCompletions $monitor)){$latest[$completion.InstanceId]=$completion}
-        foreach($completion in $latest.Values){
+        foreach($completion in @(Read-MonitorCompletions $monitor)){
+            $instance=@($config.instances|Where-Object {$_.id -eq $completion.InstanceId})[0]
+            $title=try{Get-CompletionTaskTitle $instance $completion.ThreadId}catch{'任务已完成'}
             $path=Join-Path $inbox ($completion.InstanceId+'-'+[Guid]::NewGuid().ToString('N')+'.local.json');Assert-NoReparsePoint $path
-            Write-AtomicText $path (@{schema=1;epoch=$Epoch;eventId=[Guid]::NewGuid().ToString('N');instanceId=$completion.InstanceId;threadId=$completion.ThreadId;turnId=$completion.TurnId;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Compress)
+            Write-AtomicText $path (@{schema=1;epoch=$Epoch;eventId=[Guid]::NewGuid().ToString('N');instanceId=$completion.InstanceId;threadId=$completion.ThreadId;turnId=$completion.TurnId;title=$title;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Compress)
         }
         foreach($old in @(Get-ChildItem -LiteralPath $inbox -Filter '*.local.json' -File|Sort-Object LastWriteTimeUtc -Descending|Select-Object -Skip 128)){Assert-NoReparsePoint $old.FullName;Remove-Item -LiteralPath $old.FullName -Force}
         $ticks++;if($ticks -ge 10){Write-WorkerStatus 'running' ([int]$monitor.Warnings.Count);$ticks=0}

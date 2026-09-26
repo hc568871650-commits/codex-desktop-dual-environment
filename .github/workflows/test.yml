@@ -29,6 +29,8 @@ jobs:
           ./tests/Test-Diagnostics.ps1
           ./tests/Test-CompletionMonitor.ps1
           ./tests/Test-CompletionNotifications.ps1
+          ./tests/Test-CompletionNavigation.ps1
+          ./tests/Test-QuickMenu.ps1
       - name: Test compiled controller interactions
         shell: powershell
         run: ./tests/Test-Host.ps1
@@ -37,6 +39,7 @@ jobs:
         run: |
           ./tests/Test-Setup.ps1
           ./tests/Test-ExitUi.ps1
+          ./tests/Test-Responsiveness.ps1
       - name: Package
         shell: powershell
         run: ./tests/Test-Upgrade.ps1
