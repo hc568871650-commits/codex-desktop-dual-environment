@@ -64,17 +64,22 @@ try{
     $officialFixture=$config.instances[0]
     Write-AtomicText (Join-Path $officialFixture.profile 'stubborn.fixture') ''
     Click-Button $element '同时打开两边'
-    foreach($role in @('official','api')){
-        Wait-Condition {(Find-Window '选择要显示的窗口').Count -eq 1} ('window selection '+$role)
-        $selectionHandle=(Find-Window '选择要显示的窗口')[0].Handle
-        Click-Button $selectionHandle '显示选中窗口'
-        Wait-Condition {@((Find-Window '选择要显示的窗口')|Where-Object {$_.Handle -eq $selectionHandle}).Count -eq 0} ('window selection closed '+$role)
-    }
+    # A cold-start snapshot may see the primary window before Shown creates the
+    # secondary window. Handle any selectors, then assert both actual outcomes.
+    Wait-Condition {
+        $selectors=Find-Window '选择要显示的窗口'
+        if($selectors.Count){Click-Button $selectors[0].Handle '显示选中窗口';return $false}
+        $description=[CodexDualTests.HostAutomation]::Describe($process.Id)
+        # Windows may decline foreground focus; Running is a supported result.
+        return ($description -match '官方环境：(已显示窗口|已运行；请点击其任务栏窗口)' -and $description -match 'API 环境：(已显示窗口|已运行；请点击其任务栏窗口)')
+    } 'both cold-start opens completed'
     Wait-Condition {[CodexDualTests.HostAutomation]::Responds($main.Handle)} 'dual open completed'
     foreach($instance in $config.instances){
         $status=Get-InstanceStatus $config $instance
         Check ($status.State -eq 'Running') ('Both-open button starts '+$instance.role+' fixture')
         $fixtureProcesses+=$status.Process
+        # The repeat-open flow below specifically tests multi-window selection.
+        Wait-Condition {@(Get-InstanceWindows $instance $status.Process|Where-Object {$_.Visible}).Count -eq 2} ('both fixture windows ready '+$instance.role)
     }
     Click-Button $element '同时打开两边'
     Wait-Condition {(Find-Window '选择要显示的窗口').Count -eq 1} 'repeat official selector'
