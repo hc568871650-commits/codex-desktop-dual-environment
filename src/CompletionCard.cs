@@ -8,9 +8,11 @@ namespace CodexDual {
   DateTime lastInteraction;
   public int AutoDismissMilliseconds { get; set; }
   public string ThreadId { get; set; }
+  Color borderColor = Color.FromArgb(65,65,65);
+  public Color BorderColor { get { return borderColor; } set { borderColor=value; Invalidate(); } }
   public CompletionCard() {
    DoubleBuffered=true; AutoDismissMilliseconds=15000;
-   FormBorderStyle=FormBorderStyle.None; BackColor=Color.FromArgb(250,250,249);
+   FormBorderStyle=FormBorderStyle.None; BackColor=Color.FromArgb(34,34,34);
    lifetime.Tick += delegate {
     if(Bounds.Contains(Cursor.Position) || ContainsFocus) lastInteraction=DateTime.UtcNow;
     if(AutoDismissMilliseconds>0 && (DateTime.UtcNow-lastInteraction).TotalMilliseconds>=AutoDismissMilliseconds) Close();
@@ -20,7 +22,10 @@ namespace CodexDual {
   protected override void OnPaint(PaintEventArgs e) {
    base.OnPaint(e);
    e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
-   using(var pen=new Pen(Color.FromArgb(216,216,214))) e.Graphics.DrawRectangle(pen,0,0,Width-1,Height-1);
+      using(var path=new GraphicsPath()) {
+    int d=22;path.AddArc(0,0,d,d,180,90);path.AddArc(Width-d-1,0,d,d,270,90);path.AddArc(Width-d-1,Height-d-1,d,d,0,90);path.AddArc(0,Height-d-1,d,d,90,90);path.CloseFigure();
+    using(var pen=new Pen(BorderColor))e.Graphics.DrawPath(pen,path);
+   }
   }
   protected override void Dispose(bool disposing) { if(disposing) lifetime.Dispose();base.Dispose(disposing); }
   // A completion should not interrupt typing in another application.

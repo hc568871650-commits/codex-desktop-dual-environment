@@ -2,7 +2,7 @@
     [string]$ConfigPath = '',
     [ValidateSet('tray','panel','configure','official','api','status')][string]$Action = 'panel',
     [switch]$SmokeTest,
-    [ValidateSet('main','api','diagnostics')][string]$Preview='main',
+    [ValidateSet('main','api','diagnostics','settings','notifications')][string]$Preview='main',
     [string]$ScreenshotPath,
     [Action[string]]$LifecycleObserver
 )
@@ -14,12 +14,15 @@ Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 . "$PSScriptRoot\Panel.ps1"
 . "$PSScriptRoot\CompletionNotifications.ps1"
 . "$PSScriptRoot\TrayMenu.ps1"
+. "$PSScriptRoot\QuickPopup.ps1"
+. "$PSScriptRoot\WorkspacePages.ps1"
 [Windows.Forms.Application]::EnableVisualStyles()
 function Show-Error($ErrorRecord) {if($SmokeTest){throw $ErrorRecord};[void][Windows.Forms.MessageBox]::Show($ErrorRecord.Exception.Message,'Codex 双环境','OK','Warning')}
 try {
     if(-not $ConfigPath){$ConfigPath=Join-Path (Split-Path $PSScriptRoot -Parent) 'instances.local.json';if(-not (Test-Path -LiteralPath $ConfigPath)){$ConfigPath=Join-Path $env:LOCALAPPDATA 'CodexDualController\instances.local.json'}}
     $config=Read-ControllerConfig $ConfigPath
     $script:preferences=Read-ControllerPreferences $config
+    [void][CodexDual.AppTheme]::SetAppearance($script:preferences.appearance.mode,$script:preferences.appearance.accent)
     if($Action -eq 'status') {
         $statuses=foreach($instance in $config.instances) {
             try{$s=Get-InstanceStatus $config $instance;[pscustomobject]@{Role=$instance.role;State=$s.State;ProcessId=if($s.Process){$s.Process.Id}else{$null}}}
@@ -76,7 +79,7 @@ try {
     $hashAlgorithm=[Security.Cryptography.SHA256]::Create()
     try{$configHash=[BitConverter]::ToString($hashAlgorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($ConfigPath).ToLowerInvariant()))).Replace('-','')}finally{$hashAlgorithm.Dispose()}
     $eventName='Local\CodexDual.Panel.'+$sid+'.'+$configHash
-    $tray=$null
+    $tray=$null;$menu=$null;$trayClick=$null;$script:quickPopup=$null
     $script:statusWork=$null;$script:openWork=$null
     $panel=$null;$panelEvent=$null;$configureEvent=$null;$panelTimer=$null;$script:quittingController=$false;$script:completionReady=$false
     $mutexName='Local\CodexDual.Controller.'+$sid
@@ -122,42 +125,59 @@ try {
         $menu.Add_Opening({param($sender,$e)
             Update-PanelStatus
         })
-        $tray.ContextMenuStrip=$menu;$tray.Visible=$true
-        $tray.Add_MouseClick({param($sender,$eventArgs) if($eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left){Show-ControlPanel}})
-        $panel=New-Object CodexDual.ShellForm
+        $tray.Visible=$true
+        if(-not ('CodexDual.TrayClick' -as [type])){Add-Type -Path "$PSScriptRoot\TrayClick.cs" -ReferencedAssemblies System.Windows.Forms}
+        $trayClick=New-Object CodexDual.TrayClick
+        $tray.Add_MouseDown({param($sender,$eventArgs) $trayClick.HandleMouseDown($eventArgs.Button)})
+        $trayClick.add_SingleClick({if($script:quickPopup){$script:quickPopup.Hide()};Invoke-PanelAction {Open-PanelInstance $script:apiInstance}})
+        $trayClick.add_DoubleClick({if($script:quickPopup){$script:quickPopup.Hide()};Show-ControlPanel})
+        $tray.Add_MouseUp({param($sender,$eventArgs) if($eventArgs.Button -eq [Windows.Forms.MouseButtons]::Right){Show-QuickPopup}})
+        $panel=New-Object CodexDual.ShellForm;$panel.AppWindow=$true
         $version=(Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'version.json') -Raw -Encoding UTF8|ConvertFrom-Json).version
-        $panel.Text=$controllerLabel+' · '+$version;$panel.ClientSize=New-Object Drawing.Size(600,526)
+        $panel.Text=$controllerLabel+' · '+$version;$panel.ClientSize=New-Object Drawing.Size(840,548)
         $panel.FormBorderStyle='FixedSingle';$panel.MaximizeBox=$false;$panel.StartPosition='Manual'
-        $panel.Icon=$tray.Icon;$panel.Font=New-Object Drawing.Font('Microsoft YaHei UI',10)
-        $panel.BackColor=[Drawing.ColorTranslator]::FromHtml('#FAFAF9');$panel.ForeColor=[Drawing.ColorTranslator]::FromHtml('#262626')
-        $heading=New-UiLabel $panel 'Codex 双环境' 24 20 340 34;$heading.Font=New-Object Drawing.Font('Microsoft YaHei UI',17,[Drawing.FontStyle]::Bold)
-        $subtitle=New-UiLabel $panel '两个独立窗口，按你的分工协作。' 24 60 400 26;$subtitle.ForeColor=[Drawing.ColorTranslator]::FromHtml('#737373')
-        $bothButton=New-UiButton $panel '同时打开两边' 428 27 148 {Invoke-PanelAction {Open-BothPanelInstances}};$bothButton.Primary=$true;$bothButton.Height=38
-        $panelLabels=@{}
+        $panel.Icon=$tray.Icon;$panel.Font=New-Object Drawing.Font('Microsoft YaHei UI',9.5)
+        $panel.BackColor=[CodexDual.AppTheme]::Background;$panel.ForeColor=[CodexDual.AppTheme]::Text
+        $sidebar=New-Object Windows.Forms.Panel;$sidebar.Name='Sidebar';$sidebar.SetBounds(1,0,183,548);$sidebar.BackColor=[CodexDual.AppTheme]::Sidebar;$panel.Controls.Add($sidebar)
+        $brand=New-UiLabel $sidebar 'Codex' 20 14 150 48;$brand.Font=New-Object Drawing.Font('Segoe UI',20,[Drawing.FontStyle]::Bold)
+        $brandNote=New-UiLabel $sidebar '双环境工作台' 22 67 145 27;$brandNote.ForeColor=[CodexDual.AppTheme]::Muted
+        $overviewNav=New-UiButton $sidebar '概览' 12 112 158 {Show-WorkspacePage 'overview'};$overviewNav.Height=40;$overviewNav.Quiet=$true;$overviewNav.Selected=$true;$overviewNav.TextAlign='MiddleLeft'
+        $channelNav=New-UiButton $sidebar '渠道与配置' 12 160 158 {if(-not $script:openBusy){Show-ApiManager}};$channelNav.Height=40;$channelNav.Quiet=$true;$channelNav.TextAlign='MiddleLeft'
+        $notificationNav=New-UiButton $sidebar '通知' 12 208 158 {Show-WorkspacePage 'notifications'};$notificationNav.Height=40;$notificationNav.Quiet=$true;$notificationNav.TextAlign='MiddleLeft'
+        $settingsNav=New-UiButton $sidebar '偏好设置' 12 256 158 {Show-WorkspacePage 'settings'};$settingsNav.Height=40;$settingsNav.Quiet=$true;$settingsNav.TextAlign='MiddleLeft'
+        $diagnosticNav=New-UiButton $sidebar '检查环境' 12 418 158 {Show-ControllerDiagnostics};$diagnosticNav.Height=36;$diagnosticNav.Quiet=$true;$diagnosticNav.TextAlign='MiddleLeft'
+        $exitNav=New-UiButton $sidebar '退出工具' 12 458 158 {if($script:openBusy){Set-UiMessage '请等待窗口打开操作结束，再退出工具。';return};Save-PanelPosition;$script:quittingController=$true;$context.ExitThread()};$exitNav.Height=36;$exitNav.Quiet=$true;$exitNav.TextAlign='MiddleLeft'
+        $versionLabel=New-UiLabel $sidebar ('版本 '+$version) 24 513 145 23;$versionLabel.ForeColor=[CodexDual.AppTheme]::Muted;$versionLabel.Font=New-Object Drawing.Font($panel.Font.FontFamily,8)
+        $overviewPage=New-Object Windows.Forms.Panel;$overviewPage.SetBounds(208,18,608,462);$panel.Controls.Add($overviewPage)
+        $heading=New-UiLabel $overviewPage '你的工作环境' 0 0 420 52;$heading.Font=New-Object Drawing.Font($panel.Font.FontFamily,20,[Drawing.FontStyle]::Bold)
+        $subtitle=New-UiLabel $overviewPage '两个独立窗口，按你的分工协作。' 1 59 420 28;$subtitle.ForeColor=[CodexDual.AppTheme]::Muted
+        $bothButton=New-UiButton $overviewPage '同时打开两边' 456 18 152 {Invoke-PanelAction {Open-BothPanelInstances}};$bothButton.Height=40
+        $panelLabels=@{};$script:instanceOpenButtons=@{}
         foreach($role in @('official','api')){
-            $x=if($role -eq 'official'){24}else{308}
-            $card=New-Object CodexDual.Surface;$card.SetBounds($x,104,268,186);$panel.Controls.Add($card)
-            $name=New-UiLabel $card '' 16 16 236 28;$name.AutoEllipsis=$true;$name.Font=New-Object Drawing.Font('Microsoft YaHei UI',12,[Drawing.FontStyle]::Bold);$script:instanceNames[$role]=$name
-            $label=New-UiLabel $card '正在检查状态…' 16 49 238 26;$label.AutoEllipsis=$true;$label.ForeColor=[Drawing.ColorTranslator]::FromHtml('#737373');$panelLabels[$role]=$label
-            $button=New-UiButton $card '打开' 14 91 80 {param($sender,$e) $target=$sender.Tag;Invoke-PanelAction {Open-PanelInstance @($config.instances|Where-Object {$_.role -eq $target})[0]}};$button.Tag=$role;$button.Primary=$true
-            $closeButton=New-UiButton $card '退出…' 100 91 78 {param($sender,$e) $target=$sender.Tag;Invoke-PanelAction {Close-Instance @($config.instances|Where-Object {$_.role -eq $target})[0]}};$closeButton.Tag=$role
-            $rename=New-UiButton $card '改名' 184 91 70 {param($sender,$e) $target=$sender.Tag;Show-NameDialog @($config.instances|Where-Object {$_.role -eq $target})[0]};$rename.Tag=$role
-            $folders=New-UiButton $card '常用目录…' 14 138 240 {param($sender,$e) $target=$sender.Tag;Show-InstanceDirectoryMenu @($config.instances|Where-Object {$_.role -eq $target})[0] $sender};$folders.Tag=$role
+            $x=if($role -eq 'official'){0}else{314}
+            $card=New-Object CodexDual.Surface;$card.SetBounds($x,105,294,222);$overviewPage.Controls.Add($card)
+            $eyebrow=New-UiLabel $card $(if($role -eq 'official'){'OFFICIAL'}else{'API'}) 20 17 254 20;$eyebrow.ForeColor=[CodexDual.AppTheme]::Muted;$eyebrow.Font=New-Object Drawing.Font('Segoe UI',8,[Drawing.FontStyle]::Bold)
+            $name=New-UiLabel $card '' 20 42 254 40;$name.AutoEllipsis=$true;$name.Font=New-Object Drawing.Font($panel.Font.FontFamily,15,[Drawing.FontStyle]::Bold);$script:instanceNames[$role]=$name
+            $label=New-UiLabel $card '正在检查状态…' 20 84 254 25;$label.AutoEllipsis=$true;$label.ForeColor=[CodexDual.AppTheme]::Muted;$panelLabels[$role]=$label
+            $button=New-UiButton $card '打开' 18 126 160 {param($sender,$e) $target=$sender.Tag;Invoke-PanelAction {Open-PanelInstance @($config.instances|Where-Object {$_.role -eq $target})[0]}};$button.Tag=$role;$button.Primary=$true;$button.Height=38;$script:instanceOpenButtons[$role]=$button
+            $closeButton=New-UiButton $card '退出…' 188 126 88 {param($sender,$e) $target=$sender.Tag;Invoke-PanelAction {Close-Instance @($config.instances|Where-Object {$_.role -eq $target})[0]}};$closeButton.Tag=$role;$closeButton.Quiet=$true;$closeButton.Height=38
+            $folders=New-UiButton $card '常用目录…' 14 178 166 {param($sender,$e) $target=$sender.Tag;Show-InstanceDirectoryMenu @($config.instances|Where-Object {$_.role -eq $target})[0] $sender};$folders.Tag=$role;$folders.Quiet=$true;$folders.TextAlign='MiddleLeft'
+            $rename=New-UiButton $card '改名' 198 178 78 {param($sender,$e) $target=$sender.Tag;Show-NameDialog @($config.instances|Where-Object {$_.role -eq $target})[0]};$rename.Tag=$role;$rename.Quiet=$true
         }
-        $script:apiSummary=New-UiLabel $panel 'API 渠道' 24 311 552 26
-        $script:profilePicker=New-Object Windows.Forms.ComboBox;$script:profilePicker.DropDownStyle='DropDownList';$script:profilePicker.FlatStyle='Flat';$script:profilePicker.SetBounds(24,348,292,30);$panel.Controls.Add($script:profilePicker)
-        $script:applyButton=New-UiButton $panel '应用渠道' 328 346 116 {Invoke-PanelAction {Apply-SelectedProfile $script:profilePicker.SelectedItem $false}}
-        [void](New-UiButton $panel '管理 API' 456 346 120 {if(-not $script:openBusy){Show-ApiManager}})
-        $script:feedback=New-UiLabel $panel '关闭面板即可收起到托盘。' 24 397 552 64;$script:feedback.ForeColor=[Drawing.ColorTranslator]::FromHtml('#737373')
-        $startup=New-Object Windows.Forms.CheckBox;$startup.Text='登录时打开控制面板';$startup.SetBounds(24,480,268,28);$panel.Controls.Add($startup)
-        $toolRoot=Split-Path $PSScriptRoot -Parent
-        $startup.Checked=[bool](Repair-ControllerAutoStart $toolRoot $ConfigPath)
-        $startup.Add_Click({
-            try{Set-ControllerAutoStart $toolRoot $ConfigPath $startup.Checked;Set-UiMessage $(if($startup.Checked){'已开启：登录后自动打开控制面板，Codex 仍由你手动打开。'}else{'已关闭控制器自启动。'})}
-            catch{$startup.Checked=[bool](Test-ControllerAutoStart $toolRoot $ConfigPath);Show-Error $_}
-        })
-        [void](New-UiButton $panel '检查环境' 368 477 100 {Show-ControllerDiagnostics})
-        [void](New-UiButton $panel '退出工具' 476 477 100 {if($script:openBusy){Set-UiMessage '请等待窗口打开操作结束，再退出工具。';return};Save-PanelPosition;$script:quittingController=$true;$context.ExitThread()})
+        $channelSurface=New-Object CodexDual.Surface;$channelSurface.SetBounds(0,347,608,110);$overviewPage.Controls.Add($channelSurface)
+        $script:apiSummary=New-UiLabel $channelSurface 'API 渠道' 18 14 570 25;$script:apiSummary.AutoEllipsis=$true;$script:apiSummary.ForeColor=[CodexDual.AppTheme]::Muted
+        $script:profilePicker=New-Object CodexDual.QuietComboBox;$script:profilePicker.DropDownStyle='DropDownList';$script:profilePicker.SetBounds(20,55,318,32);$channelSurface.Controls.Add($script:profilePicker)
+        $script:applyButton=New-UiButton $channelSurface '应用渠道' 350 53 110 {Invoke-PanelAction {Apply-SelectedProfile $script:profilePicker.SelectedItem $false}};$script:applyButton.Height=36
+        $manage=New-UiButton $channelSurface '管理 API' 470 53 118 {if(-not $script:openBusy){Show-ApiManager}};$manage.Height=36;$manage.Quiet=$true
+        Initialize-PreferencesPage $panel;Initialize-NotificationsPage $panel
+        $settingsPage=$script:settingsPage;$settingsHeading=$script:settingsHeading
+        $script:feedback=New-UiLabel $panel '托盘：单击打开 API 版，双击打开工作台。' 210 501 600 38;$script:feedback.ForeColor=[CodexDual.AppTheme]::Muted;$script:feedback.Font=New-Object Drawing.Font($panel.Font.FontFamily,8.5)
+        function Show-WorkspacePage([ValidateSet('overview','notifications','settings')][string]$Name){
+            $settingsPage.Visible=$Name -eq 'settings';$overviewPage.Visible=$Name -eq 'overview';$script:notificationsPage.Visible=$Name -eq 'notifications'
+            $overviewNav.Selected=$overviewPage.Visible;$settingsNav.Selected=$settingsPage.Visible;$notificationNav.Selected=$script:notificationsPage.Visible
+            $overviewNav.Invalidate();$settingsNav.Invalidate();$notificationNav.Invalidate()
+            if($Name -eq 'notifications'){Update-NotificationView -Force}
+        }
         $panel.AddTitleBar()
         function Update-PanelStatus {
             if($script:statusWork.Completed){
@@ -168,12 +188,14 @@ try {
                 $kind=if($instance.role -eq 'official'){'官方订阅'}else{'API'}
                 $s=$script:statusCache[$instance.role]
                 if($s){
+                    $script:instanceOpenButtons[$instance.role].Text=if($s.State -eq 'Running'){'显示窗口'}elseif($s.State -eq 'Stopped'){'启动'}else{'打开'}
                     $panelLabels[$instance.role].Text=$kind+' · '+$(switch($s.State){'Running'{'已运行'};'Stopped'{'未启动'};default{'状态未知'}})
                     $pending=Get-ObjectValue $script:preferences 'pendingApi' $null
                     if($instance.role -eq 'api' -and $pending -and $s.State -eq 'Running' -and $s.Process.Id -eq $pending.pid -and $s.Process.Started -eq $pending.started){$panelLabels[$instance.role].Text='API · 已运行，配置待重启'}
                     $labels[$instance.role].Text=(Get-InstanceDisplayName $instance $script:preferences).Replace('&','&&')+'：'+$s.Reason
                 }else{$panelLabels[$instance.role].Text=$kind+' · 正在检查';$labels[$instance.role].Text=$panelLabels[$instance.role].Text}
             }
+            Refresh-QuickPopupState
             if(-not $script:statusWork.Busy -and ([DateTime]::UtcNow-$script:statusRequested).TotalSeconds -ge 2){
                 $script:statusRequested=[DateTime]::UtcNow
                 $script:statusWork.Start($script:workCode,[object[]]@($PSScriptRoot,$ConfigPath,'status',[string[]]@()))
@@ -191,15 +213,16 @@ try {
             try{Set-CompletionNotificationsEnabled $completionMenu.Checked;Set-UiMessage $(if($completionMenu.Checked){'独立任务完成提示已开启。'}else{'独立任务完成提示已暂停。'})}
             catch{$completionMenu.Checked=$script:completionSettings.enabled;Show-Error $_}
         })
-        Initialize-QuickMenu
+        $notificationEnabled.Enabled=$script:completionReady;if($script:completionReady){$notificationEnabled.Checked=$script:completionSettings.enabled}
+        Initialize-QuickMenu;Initialize-QuickPopup;Update-ControllerAppearance -Force;Update-NotificationView -Force
         $panelEvent=New-Object Threading.EventWaitHandle($false,[Threading.EventResetMode]::AutoReset,$eventName)
         $configureEvent=New-Object Threading.EventWaitHandle($false,[Threading.EventResetMode]::AutoReset,($eventName+'.Configure'))
         $panelTimer=New-Object Windows.Forms.Timer;$panelTimer.Interval=50;$script:refreshTicks=0;$script:completionTicks=0;$panelTimer.Add_Tick({
             if($script:uiBusy){return};if($panelEvent.WaitOne(0)){Show-ControlPanel}
             if(-not $script:openBusy -and $configureEvent.WaitOne(0)){Show-ControlPanel;Show-ApiManager}
             if($script:openWork.Completed){Receive-PanelOpen}
-            $script:completionTicks++;if($script:completionReady -and $script:completionTicks -ge 20){$script:completionTicks=0;Update-CompletionNotifications}
-            $script:refreshTicks++;if($script:statusWork.Completed -or (($panel.Visible -or $menu.Visible) -and $script:refreshTicks -ge 40)){$script:refreshTicks=0;Update-PanelStatus}
+            $script:completionTicks++;if($script:completionReady -and $script:completionTicks -ge 20){$script:completionTicks=0;Update-CompletionNotifications;Update-NotificationView;if($script:preferences.appearance.mode -eq 'system'){Update-ControllerAppearance};Refresh-QuickPopupState}
+            $script:refreshTicks++;if($script:statusWork.Completed -or (($panel.Visible -or $menu.Visible -or $script:quickPopup.Visible) -and $script:refreshTicks -ge 40)){$script:refreshTicks=0;Update-PanelStatus}
         });$panelTimer.Start()
         if($SmokeTest){
             if($Action -in @('panel','configure')){
@@ -208,16 +231,43 @@ try {
                 $panel.Hide();Show-ControlPanel
                 if($panel.Location -ne $originalPoint -or -not $panel.Visible){throw 'Panel position retention failed'}
                 $panel.Hide()
+                # Replace the launch boundary only in this disposable smoke process.
+                $script:smokeTrayRole=''
+                function Open-PanelInstance($Instance){$script:smokeTrayRole=$Instance.role}
+                function Wait-SmokeUi([int]$Milliseconds){$watch=[Diagnostics.Stopwatch]::StartNew();while($watch.ElapsedMilliseconds -lt $Milliseconds){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 5}}
                 $mouse=New-Object Windows.Forms.MouseEventArgs([Windows.Forms.MouseButtons]::Left,1,0,0,0)
-                $method=$tray.GetType().GetMethod('OnMouseClick',[Reflection.BindingFlags]'Instance,NonPublic')
+                $method=$tray.GetType().GetMethod('OnMouseDown',[Reflection.BindingFlags]'Instance,NonPublic')
                 [void]$method.Invoke($tray.PSObject.BaseObject,[object[]]@($mouse.PSObject.BaseObject))
-                if(-not $panel.Visible -or $menu.Visible -or $panel.Location -ne $originalPoint){throw 'Left click must reveal the stationary panel, not a popup menu'}
-                if($Preview -eq 'api'){Show-ApiManager}elseif($Preview -eq 'diagnostics'){Show-ControllerDiagnostics}elseif($ScreenshotPath){Save-UiScreenshot $panel $ScreenshotPath}
+                if($panel.Visible -or $script:smokeTrayRole){throw 'First tray press must wait for double-click arbitration'}
+                Wait-SmokeUi ($trayClick.Interval+100)
+                if($script:smokeTrayRole -ne 'api' -or $panel.Visible){throw 'Tray single click must route only to API without showing the panel'}
+                $script:smokeTrayRole=''
+                [void]$method.Invoke($tray.PSObject.BaseObject,[object[]]@($mouse.PSObject.BaseObject))
+                Wait-SmokeUi ($trayClick.Interval-100)
+                [void]$method.Invoke($tray.PSObject.BaseObject,[object[]]@($mouse.PSObject.BaseObject))
+                Wait-SmokeUi ($trayClick.Interval+100)
+                if(-not $panel.Visible -or $menu.Visible -or $panel.Location -ne $originalPoint -or $script:smokeTrayRole){throw 'Double click must reveal the stationary panel without opening an instance'}
+                $settingsNav.PerformClick()
+                if(-not $settingsPage.Visible -or $overviewPage.Visible){throw 'Settings navigation failed'}
+                $overviewNav.PerformClick()
+                if(-not $overviewPage.Visible -or $settingsPage.Visible){throw 'Overview navigation failed'}
+                $notificationNav.PerformClick();[Windows.Forms.Application]::DoEvents()
+                if(-not $script:notificationsPage.Visible -or $settingsPage.Visible){throw 'Notification must open its own page'}
+                Show-WorkspacePage 'overview'
+                foreach($largeLabel in @($brand,$heading,$settingsHeading)){
+                    $required=[Windows.Forms.TextRenderer]::MeasureText($largeLabel.Text,$largeLabel.Font)
+                    if($largeLabel.Height -lt $required.Height){throw ('Heading is clipped: '+$largeLabel.Text)}
+                }
+                Write-Output ('PASS: tray single API / near-deadline double panel / page navigation / title fit ('+$trayClick.Interval+'ms)')
+                if($Preview -eq 'notifications'){Show-WorkspacePage 'notifications';[Windows.Forms.Application]::DoEvents();if($ScreenshotPath){Save-UiScreenshot $panel $ScreenshotPath}}elseif($Preview -eq 'settings'){Show-WorkspacePage 'settings';[Windows.Forms.Application]::DoEvents();if($ScreenshotPath){Save-UiScreenshot $panel $ScreenshotPath}}elseif($Preview -eq 'api'){Show-ApiManager}elseif($Preview -eq 'diagnostics'){Show-ControllerDiagnostics}elseif($ScreenshotPath){Save-UiScreenshot $panel $ScreenshotPath}
             }else{
-            $menu.Show(50,50);[Windows.Forms.Application]::DoEvents()
-            if($ScreenshotPath){$bmp=New-Object Drawing.Bitmap($menu.Width,$menu.Height);try{$menu.DrawToBitmap($bmp,(New-Object Drawing.Rectangle(0,0,$menu.Width,$menu.Height)));$bmp.Save($ScreenshotPath)}finally{$bmp.Dispose()}}
-            $menu.Close()
+            $mouse=New-Object Windows.Forms.MouseEventArgs([Windows.Forms.MouseButtons]::Right,1,0,0,0)
+            $method=$tray.GetType().GetMethod('OnMouseUp',[Reflection.BindingFlags]'Instance,NonPublic')
+            [void]$method.Invoke($tray.PSObject.BaseObject,[object[]]@($mouse.PSObject.BaseObject));[Windows.Forms.Application]::DoEvents()
+            if(-not $script:quickPopup.Visible -or $tray.ContextMenuStrip){throw 'Right click must show the custom popup only'}
+            if($ScreenshotPath){Save-UiScreenshot $script:quickPopup $ScreenshotPath}
+            $script:quickPopup.Hide()
             }
         }else{if($Action -in @('panel','configure')){Show-ControlPanel};if($LifecycleObserver){$LifecycleObserver.Invoke('ready-'+$Action)};if($Action -eq 'configure'){Show-ApiManager};[Windows.Forms.Application]::Run($context)}
-    }finally{if($panelTimer){$panelTimer.Stop();$panelTimer.Dispose()};if($script:statusWork){$script:statusWork.Dispose()};if($script:openWork){$script:openWork.Dispose()};if($script:completionReady){Dispose-CompletionNotifications};if($panelEvent){$panelEvent.Dispose()};if($configureEvent){$configureEvent.Dispose()};if($panel){$panel.Dispose()};if($tray){$tray.Visible=$false;$tray.Dispose()};if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
+    }finally{if($script:quickPopup){$script:quickPopup.Dispose()};if($menu){$menu.Dispose()};if($trayClick){$trayClick.Dispose()};if($panelTimer){$panelTimer.Stop();$panelTimer.Dispose()};if($script:statusWork){$script:statusWork.Dispose()};if($script:openWork){$script:openWork.Dispose()};if($script:completionReady){Dispose-CompletionNotifications};if($panelEvent){$panelEvent.Dispose()};if($configureEvent){$configureEvent.Dispose()};if($panel){$panel.Dispose()};if($tray){$tray.Visible=$false;$tray.Dispose()};if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
 }catch{if($LifecycleObserver){$LifecycleObserver.Invoke('failed-'+$_.Exception.GetType().FullName)};if($Action -eq 'status' -or $SmokeTest){throw};Show-Error $_;exit 1}

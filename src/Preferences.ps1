@@ -2,13 +2,17 @@
 
 function Get-ControllerPreferencesPath($Config) { return Join-Path $Config.stateDirectory 'preferences.local.json' }
 function Read-ControllerPreferences($Config) {
-    $value=@{schema=1;names=@{};panel=$null;ccsExecutable='';ccsSettingsPath='';pendingApi=$null}
+    $value=@{schema=1;names=@{};panel=$null;ccsExecutable='';ccsSettingsPath='';pendingApi=$null;appearance=@{mode='dark';accent='neutral'}}
     $path=Get-ControllerPreferencesPath $Config
     Assert-NoReparsePoint $path
     if(Test-Path -LiteralPath $path){
         $saved=Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json
         if($saved.schema -ne 1){throw '不支持的面板设置版本。'}
         foreach($key in @('panel','ccsExecutable','ccsSettingsPath','pendingApi')){$value[$key]=Get-ObjectValue $saved $key $value[$key]}
+        $appearance=Get-ObjectValue $saved 'appearance' $null
+        $mode=Get-ObjectValue $appearance 'mode' 'dark';$accent=Get-ObjectValue $appearance 'accent' 'neutral'
+        if($mode -in @('dark','light','system')){$value.appearance.mode=$mode}
+        if($accent -in @('neutral','blue','green','purple')){$value.appearance.accent=$accent}
         $names=Get-ObjectValue $saved 'names' $null
         if($names){foreach($property in $names.PSObject.Properties){$value.names[$property.Name]=[string]$property.Value}}
     }

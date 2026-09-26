@@ -3,12 +3,8 @@ if(-not ('CodexDual.ExitWaitDialog' -as [type])){Add-Type -Path "$PSScriptRoot\E
 if(-not ('CodexDual.QuietButton' -as [type])){Add-Type -Path "$PSScriptRoot\UiTheme.cs" -ReferencedAssemblies System.Windows.Forms,System.Drawing}
 if(-not ('CodexDual.BackgroundWork' -as [type])){Add-Type -Path "$PSScriptRoot\BackgroundWork.cs" -ReferencedAssemblies System.Management.Automation,System.Windows.Forms}
 function Set-UiTheme($Control) {
-    $Control.BackColor=[Drawing.ColorTranslator]::FromHtml('#FAFAF9')
-    $Control.ForeColor=[Drawing.ColorTranslator]::FromHtml('#262626')
-    foreach($child in $Control.Controls){
-        if($child -is [Windows.Forms.TextBox] -or $child -is [Windows.Forms.ListBox] -or $child -is [Windows.Forms.ComboBox]){$child.BackColor=[Drawing.Color]::White;$child.ForeColor=$Control.ForeColor}
-        elseif($child -isnot [Windows.Forms.Button]){Set-UiTheme $child}
-    }
+    [CodexDual.AppTheme]::ApplyTo($Control)
+    if($Control.PSObject.Properties['BorderColor']){$Control.BorderColor=[CodexDual.AppTheme]::Border}
 }
 function New-UiLabel($Parent,[string]$Text,[int]$X,[int]$Y,[int]$Width,[int]$Height=26) {
     $label=New-Object Windows.Forms.Label;$label.Text=$Text;$label.UseMnemonic=$false;$label.SetBounds($X,$Y,$Width,$Height);$Parent.Controls.Add($label);return $label
@@ -17,7 +13,7 @@ function New-UiButton($Parent,[string]$Text,[int]$X,[int]$Y,[int]$Width,[scriptb
     $button=New-Object CodexDual.QuietButton;$button.Text=$Text;$button.SetBounds($X,$Y,$Width,32);$button.Add_Click($Click);$Parent.Controls.Add($button);return $button
 }
 function New-UiTextBox($Parent,[int]$X,[int]$Y,[int]$Width) {
-    $box=New-Object Windows.Forms.TextBox;$box.SetBounds($X,$Y,$Width,28);$Parent.Controls.Add($box);return $box
+    $box=New-Object Windows.Forms.TextBox;$box.BorderStyle='FixedSingle';$box.SetBounds($X,$Y,$Width,28);$Parent.Controls.Add($box);return $box
 }
 function Set-UiMessage([string]$Message) {$script:feedback.Text=$Message}
 $script:openBusy=$false
@@ -70,7 +66,7 @@ function Show-ControlPanel {
     $panel.Show();$panel.Activate();Update-PanelStatus
 }
 function Show-NameDialog($Instance) {
-    $dialog=New-Object Windows.Forms.Form;$dialog.Text='修改显示名称';$dialog.ClientSize=New-Object Drawing.Size(390,165)
+    $dialog=New-Object CodexDual.ShellForm;$dialog.Text='修改显示名称';$dialog.ClientSize=New-Object Drawing.Size(390,165)
     $dialog.FormBorderStyle='FixedDialog';$dialog.MaximizeBox=$false;$dialog.MinimizeBox=$false;$dialog.StartPosition='CenterParent';$dialog.Font=$panel.Font
     [void](New-UiLabel $dialog '显示名称（1–24 个字符）' 20 18 340)
     $nameInput=New-UiTextBox $dialog 20 49 350;$nameInput.MaxLength=24;$nameInput.Text=Get-InstanceDisplayName $Instance (Read-ControllerPreferences $config)
@@ -81,7 +77,7 @@ function Show-NameDialog($Instance) {
         try{[void](Set-InstanceDisplayName $config $Instance '' -Reset);Update-PanelNames;$dialog.DialogResult='OK'}catch{Show-Error $_}
     })
     $cancel=New-UiButton $dialog '取消' 244 104 126 {$dialog.DialogResult='Cancel'};$dialog.AcceptButton=$ok;$dialog.CancelButton=$cancel
-    Set-UiTheme $dialog
+    Set-UiTheme $dialog;$dialog.AddTitleBar()
     try{[void]$dialog.ShowDialog($panel)}finally{$dialog.Dispose()}
 }
 function Update-ApiSummary {
@@ -125,12 +121,12 @@ function Show-ApiManager {
     if($script:apiDialog -and -not $script:apiDialog.IsDisposed){$script:apiDialog.Activate();return}
     $instance=$script:apiInstance
     if($instance.launchMode -ne 'managed-api'){[void][Windows.Forms.MessageBox]::Show('此实例使用已登记的外部启动器，请通过原工具配置 API。可从“常用目录…”打开配置目录。','API 管理');return}
-    $dialog=New-Object Windows.Forms.Form;$dialog.Text='API 渠道管理';$dialog.ClientSize=New-Object Drawing.Size(640,570)
+    $dialog=New-Object CodexDual.ShellForm;$dialog.Text='API 渠道管理';$dialog.ClientSize=New-Object Drawing.Size(640,570)
     $dialog.FormBorderStyle='FixedDialog';$dialog.MaximizeBox=$false;$dialog.MinimizeBox=$false;$dialog.StartPosition='Manual';$dialog.Location=$panel.Location;$dialog.Font=$panel.Font
-    $tabs=New-Object Windows.Forms.TabControl;$tabs.Dock='Fill';$dialog.Controls.Add($tabs)
-    $channels=New-Object Windows.Forms.TabPage('渠道方案');$ccsPage=New-Object Windows.Forms.TabPage('CCS 接入');$backupPage=New-Object Windows.Forms.TabPage('备份恢复')
-    $tabs.TabPages.AddRange(@($channels,$ccsPage,$backupPage))
-    $list=New-Object Windows.Forms.ListBox;$list.SetBounds(18,20,200,336);$list.DisplayMember='name';$channels.Controls.Add($list)
+    $tabs=New-Object CodexDual.QuietTabs;$tabs.Dock='Fill';$dialog.Controls.Add($tabs)
+    $channels=New-Object Windows.Forms.Panel;$channels.Text='渠道方案';$ccsPage=New-Object Windows.Forms.Panel;$ccsPage.Text='CCS 接入';$backupPage=New-Object Windows.Forms.Panel;$backupPage.Text='备份恢复'
+    foreach($page in @($channels,$ccsPage,$backupPage)){$tabs.AddPage($page)}
+    $list=New-Object CodexDual.QuietListBox;$list.SetBounds(18,20,200,336);$list.DisplayMember='name';$channels.Controls.Add($list)
     [void](New-UiLabel $channels '渠道名称' 238 20 350);$nameBox=New-UiTextBox $channels 238 46 368;$nameBox.MaxLength=40
     [void](New-UiLabel $channels 'API 地址（支持 Responses API）' 238 84 368);$urlBox=New-UiTextBox $channels 238 110 368
     [void](New-UiLabel $channels '默认模型 ID' 238 148 368);$modelBox=New-UiTextBox $channels 238 174 368
@@ -197,7 +193,7 @@ function Show-ApiManager {
     $ccsToggle.Text=if($isCcs){'恢复内置管理'}else{'交给 CCS 管理'}
     if($isCcs){$tabs.SelectedTab=$ccsPage}
     [void](New-UiLabel $backupPage '恢复快照会同时恢复 API 配置、密钥及渠道列表。' 18 20 590 44)
-    $backupList=New-Object Windows.Forms.ListBox;$backupList.SetBounds(18,80,588,278);$backupList.DisplayMember='label';$backupPage.Controls.Add($backupList)
+    $backupList=New-Object CodexDual.QuietListBox;$backupList.SetBounds(18,80,588,278);$backupList.DisplayMember='label';$backupPage.Controls.Add($backupList)
     function Refresh-BackupList {
         $backupList.Items.Clear();$folder=Join-Path $instance.apiRoot 'Backup';Assert-NoReparsePoint $folder
         foreach($file in @(Get-ChildItem -LiteralPath $folder -Filter 'snapshot-*.local.json' -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending)){
@@ -213,7 +209,7 @@ function Show-ApiManager {
     })
     [void](New-UiLabel $backupPage '快照仅供当前 Windows 用户解密。恢复前会另存一份备份。' 18 432 588 64)
     $script:apiDialog=$dialog
-    Set-UiTheme $dialog
+    Set-UiTheme $dialog;$dialog.AddTitleBar()
     try{Refresh-ChannelList '';Refresh-BackupList
         if($SmokeTest -and $Preview -eq 'api'){$dialog.Show();[Windows.Forms.Application]::DoEvents();Save-UiScreenshot $dialog $ScreenshotPath}
         else{[void]$dialog.ShowDialog($panel)}
@@ -228,6 +224,13 @@ function Get-OpenOutcomeText([string]$Outcome) {
     }
 }
 function Open-PanelInstance($Instance) {
+    if($script:openBusy){return}
+    $cached=Get-ObjectValue $script:statusCache $Instance.role $null
+    if($cached -and $cached.State -eq 'Running' -and $cached.Process -and (Get-ObjectValue $cached 'InstanceId' '') -eq $Instance.id -and (Get-ObjectValue $cached 'Home' '') -eq $Instance.home -and (Get-ObjectValue $cached 'Profile' '') -eq $Instance.profile){
+        $known=$cached.Process
+        $outcome=Invoke-InstanceLocked $Instance {[CodexDual.Native]::FocusKnownVisible($known.Id,[long]$known.Started,$known.Path,$known.Command,$Instance.home,$Instance.profile)}
+        if($outcome -in @('Shown','Running')){Set-UiMessage ((Get-InstanceDisplayName $Instance $script:preferences)+'：'+(Get-OpenOutcomeText $outcome));return}
+    }
     Start-PanelOpen @($Instance.role)
 }
 function Open-BothPanelInstances {
@@ -238,14 +241,23 @@ function Start-PanelOpen([string[]]$Roles,[string]$ThreadId='') {
     Set-PanelOpenBusy $true
     Set-UiMessage '正在打开窗口… 面板仍可移动或收起。'
     $operation=if($ThreadId){'task'}else{'open'}
-    try{$script:openWork.Start($script:workCode,[object[]]@($PSScriptRoot,$ConfigPath,$operation,$Roles,$ThreadId))}
+    $knownInstances=@{}
+    foreach($role in $Roles){$cached=Get-ObjectValue $script:statusCache $role $null;if($cached -and $cached.State -eq 'Running' -and (Get-ObjectValue $cached 'InstanceId' '')){$knownInstances[$role]=$cached}}
+    try{$script:openWork.Start($script:workCode,[object[]]@($PSScriptRoot,$ConfigPath,$operation,$Roles,$ThreadId,$knownInstances))}
     catch{Set-PanelOpenBusy $false;throw}
+}
+function Get-UiActionControls($Parent) {
+    foreach($child in $Parent.Controls){
+        if($child.Name -eq 'WindowCaption'){continue}
+        if($child -is [Windows.Forms.Button]){$child}
+        if($child.HasChildren){Get-UiActionControls $child}
+    }
 }
 function Set-PanelOpenBusy([bool]$Busy) {
     $script:openBusy=$Busy
     if($Busy){
         $script:disabledForOpen=@()
-        $controls=@($panel.Controls)+@($panel.Controls|Where-Object {$_ -is [CodexDual.Surface]}|ForEach-Object {$_.Controls})
+        $controls=@(Get-UiActionControls $panel)
         foreach($control in $controls){if($control -is [Windows.Forms.Button] -and $control.Enabled){$script:disabledForOpen+=,$control;$control.Enabled=$false}}
     }else{
         foreach($control in $script:disabledForOpen){if(-not $control.IsDisposed){$control.Enabled=$true}}
@@ -267,7 +279,11 @@ function Receive-PanelOpen {
                     $focused=@($windows|Where-Object {$_.Handle -eq [CodexDual.Native]::Foreground()})
                     if($focused.Count -eq 1){$windows=$focused}
                 }
-                $outcome=Complete-InstanceOpen $instance $result.Process $windows
+                $outcome='Fallback'
+                if((Get-ObjectValue $result 'QuickIdentity' $false) -and $windows.Count -eq 1){
+                    $known=$result.Process;$outcome=[CodexDual.Native]::FocusKnownVisible($known.Id,[long]$known.Started,$known.Path,$known.Command,$instance.home,$instance.profile)
+                }
+                if($outcome -eq 'Fallback'){$outcome=Complete-InstanceOpen $instance $result.Process $windows}
                 $detail=Get-OpenOutcomeText $outcome
                 if((Get-ObjectValue $result 'TaskOutcome' '') -eq 'Requested'){$detail+='；已向此环境发送任务定位请求'}
                 elseif((Get-ObjectValue $result 'TaskOutcome' '') -eq 'Unsupported'){$detail+='；此程序入口未确认支持任务链接，请在该端选择任务';$needsAttention=$true}
@@ -296,7 +312,7 @@ function Show-InstanceDirectoryMenu($Instance,$Button) {
 }
 function Show-ControllerDiagnostics {
     $report=$null;$reportText='正在检查环境…'
-    $dialog=New-Object Windows.Forms.Form;$dialog.Text='环境检查 · 脱敏报告';$dialog.ClientSize=New-Object Drawing.Size(720,510);$dialog.StartPosition='CenterParent';$dialog.Font=$panel.Font
+    $dialog=New-Object CodexDual.ShellForm;$dialog.Text='环境检查 · 脱敏报告';$dialog.ClientSize=New-Object Drawing.Size(720,510);$dialog.StartPosition='CenterParent';$dialog.Font=$panel.Font
     $dialog.MinimumSize=New-Object Drawing.Size(650,440)
     $bar=New-Object Windows.Forms.Panel;$bar.Dock='Bottom';$bar.Height=56;$dialog.Controls.Add($bar)
     $text=New-Object Windows.Forms.TextBox;$text.Multiline=$true;$text.ReadOnly=$true;$text.ScrollBars='Vertical';$text.WordWrap=$true;$text.Dock='Fill';$text.Text=$reportText;$dialog.Controls.Add($text);$text.BringToFront()
@@ -309,7 +325,7 @@ function Show-ControllerDiagnostics {
         try{if($picker.ShowDialog($dialog) -eq 'OK'){Export-ControllerDiagnostics $diagnosticState.report $picker.FileName;$hint.Text='脱敏报告已保存。'}}catch{$hint.Text='保存失败，请选择一个未使用的文件名。'}finally{$picker.Dispose()}
     };$save.Anchor='Top,Right'
     $close=New-UiButton $bar '关闭' 606 12 100 {$dialog.Close()};$close.Anchor='Top,Right';$dialog.CancelButton=$close
-    Set-UiTheme $dialog
+    Set-UiTheme $dialog;$dialog.AddTitleBar()
     $copy.Enabled=$false;$save.Enabled=$false
     $diagnosticWork=New-Object CodexDual.BackgroundWork
     $diagnosticState=@{report=$null;done=$false;error=$null}

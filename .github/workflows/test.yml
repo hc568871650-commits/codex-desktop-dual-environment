@@ -31,6 +31,16 @@ jobs:
           ./tests/Test-CompletionNotifications.ps1
           ./tests/Test-CompletionNavigation.ps1
           ./tests/Test-QuickMenu.ps1
+      - name: Test 0.7 appearance, notifications and tray activation
+        shell: powershell
+        run: |
+          ./tests/Test-Appearance.ps1
+          ./tests/Test-NotificationToggle.ps1
+          ./tests/Test-TrayClick.ps1
+          ./tests/Test-TrayPopup.ps1
+          ./tests/Test-QuickPopup.ps1
+          ./tests/Test-FastRestore.ps1
+          ./tests/Test-HiddenActivation.ps1
       - name: Test compiled controller interactions
         shell: powershell
         run: ./tests/Test-Host.ps1

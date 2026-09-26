@@ -201,32 +201,32 @@ function Get-InstanceWindows($Instance,$Process) {
     [void](Assert-CurrentIdentity $Instance $Process)
     return @([CodexDual.Native]::Windows($Process.Id))
 }
-function Request-NativeInstanceActivation($Instance,$Process) {
-    # Only use the packaged app's verified single-instance route. No credential is needed for forwarding.
-    $storeExecutable=$null
-    try{$storeExecutable=Find-CodexExecutable ''}catch{return $false}
-    if(-not (Test-SamePath $Process.Path $storeExecutable)){return $false}
+function Assert-ActivationIdentity($Instance,$Process,[switch]$QuickIdentity) {
+    if($QuickIdentity){
+        if(-not [CodexDual.Native]::IsKnownProcess($Process.Id,[long]$Process.Started,$Process.Path,$Process.Command,$Instance.home,$Instance.profile)){throw '目标已退出或进程身份变化，请刷新状态。'}
+    }else{[void](Assert-CurrentIdentity $Instance $Process)}
+}
+function Request-NativeInstanceActivation($Instance,$Process,[switch]$QuickIdentity) {
     Invoke-InstanceLocked $Instance {
-        [void](Assert-CurrentIdentity $Instance $Process)
-        # A visible window can be focused without launching the Store executable again.
-        if (@([CodexDual.Native]::Windows($Process.Id) | Where-Object {$_.Visible}).Count) { return $true }
+        Assert-ActivationIdentity $Instance $Process -QuickIdentity:$QuickIdentity
+        if(@([CodexDual.Native]::Windows($Process.Id)|Where-Object {$_.Visible}).Count){return $true}
+        $storeExecutable=$null
+        try{$storeExecutable=Find-CodexExecutable ''}catch{return $false}
+        if(-not (Test-SamePath $Process.Path $storeExecutable)){return $false}
         $info=New-CodexStartInfo -Executable $Process.Path -OfficialHome $Instance.home
         $info.WorkingDirectory=$Instance.projects
         if($Instance.profile){$info.Arguments='--user-data-dir="'+$Instance.profile+'"'}
-        # External launchers own package activation and credential/environment setup.
-        if ($Instance.launchMode -eq 'external') {
-            $info.FileName = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-            $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $Instance.externalLauncher + '"'
-        }
+        # This process is already running with verified routing. Forward directly to its native
+        # single-instance handler; external launchers and credentials remain cold-start-only.
+        Assert-ActivationIdentity $Instance $Process -QuickIdentity:$QuickIdentity
         $secondaryId=[CodexDual.Native]::StartDetached($info)
-        for($attempt=0;$attempt -lt 20;$attempt++){
-            if(-not (Get-Process -Id $secondaryId -ErrorAction SilentlyContinue)){
-                [void](Assert-CurrentIdentity $Instance $Process)
-                return $true
-            }
-            if($attempt -lt 19){Start-Sleep -Milliseconds 250}
+        $secondary=Get-Process -Id $secondaryId -ErrorAction SilentlyContinue
+        if($secondary){
+            try{if(-not $secondary.WaitForExit(5000)){throw '原生唤起请求未按预期退出；不会强行显示窗口或重试。请检查此桌面版本的单实例行为。'}}
+            finally{$secondary.Dispose()}
         }
-        throw '原生唤起请求未按预期退出；不会强行显示窗口或重试。请检查此桌面版本的单实例行为。'
+        Assert-ActivationIdentity $Instance $Process -QuickIdentity:$QuickIdentity
+        return $true
     }
 }
 function Show-InstanceWindow($Instance,$Process,[long]$Handle) {

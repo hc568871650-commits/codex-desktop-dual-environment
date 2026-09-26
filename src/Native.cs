@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -92,6 +92,54 @@ namespace CodexDual {
     }
     throw new InvalidOperationException("Environment limit exceeded");
    } finally {CloseHandle(h);}
+  }
+  static bool SameRoutingPath(string a,string b) {
+   if(string.IsNullOrEmpty(a)||string.IsNullOrEmpty(b))return string.IsNullOrEmpty(a)&&string.IsNullOrEmpty(b);
+   return string.Equals(System.IO.Path.GetFullPath(a).TrimEnd('\\'),System.IO.Path.GetFullPath(b).TrimEnd('\\'),StringComparison.OrdinalIgnoreCase);
+  }
+  // Same x64 process-parameter boundary as the existing routing-path reader. Never log command contents.
+  static string ReadCommandLine(int pid) {
+   if(IntPtr.Size!=8)throw new NotSupportedException();
+   IntPtr h=OpenProcess(0x410,false,pid);if(h==IntPtr.Zero)throw new InvalidOperationException("Cannot inspect process");
+   try {
+    bool wow;if(!IsWow64Process(h,out wow)||wow)throw new NotSupportedException();
+    var info=new IntPtr[6];int returned;if(NtQueryInformationProcess(h,0,info,48,out returned)!=0)throw new InvalidOperationException("Cannot query process");
+    long parameters=BitConverter.ToInt64(Read(h,info[1].ToInt64()+0x20,8),0);
+    byte[] command=Read(h,parameters+0x70,16);int length=BitConverter.ToUInt16(command,0),maximum=BitConverter.ToUInt16(command,2);
+    long pointer=BitConverter.ToInt64(command,8);
+    if(length<2||length>maximum||(length&1)!=0||pointer==0)throw new InvalidOperationException("Unsupported command layout");
+    return Encoding.Unicode.GetString(Read(h,pointer,length));
+   }finally{CloseHandle(h);}
+  }
+  // Fast focus is strictly for an already-discovered process with ONE visible main window.
+  // It cannot launch an executable or force-show a hidden Electron overlay.
+  static bool MatchesKnownProcess(Process process,int pid,long started,string path,string command,string home,string profile) {
+     IntPtr held=process.Handle; // Hold a process handle until the last window ownership check.
+     if(process.HasExited||Math.Abs(process.StartTime.ToUniversalTime().Ticks-started)>=10||!SameRoutingPath(process.MainModule.FileName,path))return false;
+     string actualCommand=ReadCommandLine(pid);if(!string.Equals(actualCommand,command,StringComparison.Ordinal))return false;
+     var args=Arguments(actualCommand);string actualProfile="";int profiles=0;
+     for(int i=1;i<args.Length;i++) {
+      if(args[i]=="--type"||args[i].StartsWith("--type="))return false;
+      if(args[i]=="--user-data-dir"){if(++i>=args.Length)return false;actualProfile=args[i];profiles++;}
+      else if(args[i].StartsWith("--user-data-dir=")){actualProfile=args[i].Substring(16);profiles++;}
+     }
+     if(profiles>1||!SameRoutingPath(actualProfile,profile)||!SameRoutingPath(CodexHome(pid),home))return false;
+   return true;
+  }
+  public static bool IsKnownProcess(int pid,long started,string path,string command,string home,string profile) {
+   try {using(var process=Process.GetProcessById(pid)){return MatchesKnownProcess(process,pid,started,path,command,home,profile);}}
+   catch(ArgumentException){return false;}catch(InvalidOperationException){return false;}catch(System.ComponentModel.Win32Exception){return false;}catch(NotSupportedException){return false;}
+  }
+  public static string FocusKnownVisible(int pid,long started,string path,string command,string home,string profile) {
+   try {
+    using(var process=Process.GetProcessById(pid)) {
+     if(!MatchesKnownProcess(process,pid,started,path,command,home,profile))return "Fallback";
+     WindowInfo target=null;
+     foreach(var window in Windows(pid)){if(!window.Visible)continue;if(target!=null)return "Fallback";target=window;}
+     if(target==null||process.HasExited)return "Fallback";
+     return FocusVisible(target.Handle,pid)?"Shown":"Running";
+    }
+   }catch(ArgumentException){return "Fallback";}catch(InvalidOperationException){return "Fallback";}catch(System.ComponentModel.Win32Exception){return "Fallback";}catch(NotSupportedException){return "Fallback";}
   }
   public static WindowInfo[] Windows(int pid) {
    var list=new List<WindowInfo>();
