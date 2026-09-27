@@ -1,5 +1,10 @@
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSEdition -ne 'Desktop') { throw 'Use Windows PowerShell 5.1.' }
+[Text.Encoding]$originalInputEncoding = [Console]::InputEncoding
+try {
+# Process.StandardInput inherits Console.InputEncoding on .NET Framework.
+# Keep fixture JSON free of an implicit BOM even on UTF-8 Windows runners.
+[Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
 $experiment = Split-Path $PSScriptRoot -Parent
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('bridge-transport-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($tempRoot)
@@ -33,10 +38,14 @@ function Start-Case([string]$name, [bool]$disabled = $false, [string[]]$argument
     $start.RedirectStandardInput = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
+    $start.StandardOutputEncoding = New-Object Text.UTF8Encoding($false)
     $start.EnvironmentVariables['CODEX_HOME'] = $taskHome
     $process = [Diagnostics.Process]::Start($start)
-    return @{ Process = $process; Pipe = $pipeName; Directory = $directory }
+    $inputWriter = New-Object IO.StreamWriter($process.StandardInput.BaseStream, (New-Object Text.UTF8Encoding($false)))
+    $inputWriter.AutoFlush = $true
+    return @{ Process = $process; Pipe = $pipeName; Directory = $directory; InputWriter = $inputWriter }
 }
+function Write-InputLine($case, [string]$line) { $case.InputWriter.WriteLine($line) }
 function Connect-Pipe([string]$name) {
     $pipe = New-Object IO.Pipes.NamedPipeClientStream('.', $name, [IO.Pipes.PipeDirection]::InOut)
     $pipe.Connect(3000)
@@ -48,7 +57,7 @@ function Command($client, $command) {
     return (Read-Line $client.Reader)
 }
 function Close-Case($case) {
-    $case.Process.StandardInput.Close()
+    $case.InputWriter.Close()
     Assert ($case.Process.WaitForExit(5000)) 'Bridge failed to exit on stdin EOF.'
     Assert ($case.Process.ExitCode -eq 0) ('Bridge exit: ' + $case.Process.StandardError.ReadToEnd())
     $case.Process.Dispose()
@@ -62,9 +71,13 @@ function Start-SameCase($case) {
     $start.RedirectStandardInput = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
+    $start.StandardOutputEncoding = New-Object Text.UTF8Encoding($false)
     $start.EnvironmentVariables['CODEX_HOME'] = Join-Path $case.Directory 'api-home'
     $start.EnvironmentVariables['CODEX_CLI_PATH'] = $start.FileName
-    return @{ Process = [Diagnostics.Process]::Start($start); Pipe = $case.Pipe; Directory = $case.Directory }
+    $process = [Diagnostics.Process]::Start($start)
+    $inputWriter = New-Object IO.StreamWriter($process.StandardInput.BaseStream, (New-Object Text.UTF8Encoding($false)))
+    $inputWriter.AutoFlush = $true
+    return @{ Process = $process; Pipe = $case.Pipe; Directory = $case.Directory; InputWriter = $inputWriter }
 }
 $answer = @{ choice = @{ answers = @('B') }; detail = @{ answers = @('private answer') } }
 $results = @()
@@ -97,8 +110,8 @@ try {
     $received = Read-Line $case.Process.StandardOutput
     Assert ($received.params.message.id -eq 42 -and $received.params.message.result.answers.choice.answers[0] -eq 'B') 'External response not forwarded.'
     [IO.File]::WriteAllText((Join-Path $case.Directory 'DISABLED'), '')
-    $case.Process.StandardInput.WriteLine('{"id":42,"result":{"answers":{}}}')
-    $case.Process.StandardInput.WriteLine('{"id":43,"result":{}}')
+    Write-InputLine $case '{"id":42,"result":{"answers":{}}}'
+    Write-InputLine $case '{"id":43,"result":{}}'
     $received = Read-Line $case.Process.StandardOutput
     Assert ($received.params.message.id -eq 43) 'Unknown/native response lost or duplicate answer forwarded after rollback.'
     $results += 'external arbitration, binding, validation, unknown request/notification'
@@ -111,7 +124,7 @@ try {
     $client = Connect-Pipe $case.Pipe
     try {
         $pending = (Command $client @{ command='snapshot' }).pending[0]
-        $case.Process.StandardInput.WriteLine('{"id":42,"result":{"answers":{}}}')
+        Write-InputLine $case '{"id":42,"result":{"answers":{}}}'
         $received = Read-Line $case.Process.StandardOutput
         Assert ($received.params.message.id -eq 42) 'Native answer not forwarded.'
         Assert ((Command $client @{ command='answer'; connectionId=$pending.connectionId; requestToken=$pending.requestToken; requestId=42; threadId=$pending.threadId; turnId=$pending.turnId; answers=$answer }).error -eq 'stale') 'External answer won after native.'
@@ -129,7 +142,7 @@ try {
     $client = Connect-Pipe $case.Pipe
     try { Assert ((Command $client @{ command='snapshot' }).pending.Count -eq 1) 'Disconnected client removed native pending request.' }
     finally { $client.Pipe.Dispose() }
-    $case.Process.StandardInput.WriteLine('{"id":42,"result":{"answers":{}}}')
+    Write-InputLine $case '{"id":42,"result":{"answers":{}}}'
     Assert ((Read-Line $case.Process.StandardOutput).params.message.id -eq 42) 'Native answer unavailable after client disconnect.'
     $results += 'pipe disconnect and reconnect'
 } finally { Close-Case $case }
@@ -145,7 +158,7 @@ try {
         Assert ((Command $client @{ command='answer'; connectionId=$pending.connectionId; requestToken=$pending.requestToken; requestId=42; threadId=$pending.threadId; turnId=$pending.turnId; answers=$answer }).error -eq 'disabled') 'Live disable accepted answer.'
         Assert ((Command $client @{ command='snapshot' }).pending.Count -eq 0) 'Live disable retained pending.'
     } finally { $client.Pipe.Dispose() }
-    $case.Process.StandardInput.WriteLine('{"id":42,"result":{"answers":{}}}')
+    Write-InputLine $case '{"id":42,"result":{"answers":{}}}'
     Assert ((Read-Line $case.Process.StandardOutput).params.message.id -eq 42) 'Native answer unavailable after live disable.'
     $results += 'running DISABLED fallback'
 } finally { Close-Case $case }
@@ -156,8 +169,10 @@ try {
     1..3 | ForEach-Object { [void](Read-Line $case.Process.StandardOutput) }
     try { $client = Connect-Pipe $case.Pipe; $client.Pipe.Dispose(); throw 'DISABLED opened event pipe.' }
     catch [TimeoutException] { }
-    $case.Process.StandardInput.WriteLine('{"id":42,"result":{"answers":{}}}')
-    Assert ((Read-Line $case.Process.StandardOutput).params.message.id -eq 42) 'Disabled passthrough failed.'
+    $unicodeText = -join @([char]0x4E2D, [char]0x6587, [char]0x900F, [char]0x4F20)
+    Write-InputLine $case (@{id=42;result=@{answers=@{}};note=$unicodeText} | ConvertTo-Json -Compress -Depth 4)
+    $received = Read-Line $case.Process.StandardOutput
+    Assert ($received.params.message.id -eq 42 -and $received.params.message.note -ceq $unicodeText) ('Disabled passthrough failed; received: ' + ($received | ConvertTo-Json -Compress -Depth 8))
     $results += 'startup DISABLED passthrough'
 } finally { Close-Case $case }
 
@@ -165,7 +180,7 @@ Write-Output 'RUN other-command'
 $case = Start-Case 'other-command' $false @('--version')
 try {
     Assert ((Read-Line $case.Process.StandardOutput).params.argv[0] -eq '--version') 'Other CLI command args changed.'
-    $case.Process.StandardInput.WriteLine('literal text')
+    Write-InputLine $case 'literal text'
     Assert ($case.Process.StandardOutput.ReadLine() -eq 'literal text') 'Other CLI stdin/stdout changed.'
     $results += 'other CLI transparent forwarding'
 } finally { Close-Case $case }
@@ -190,7 +205,7 @@ try {
         $command = @{ command='answer'; connectionId=$first.connectionId; requestToken=$first.requestToken; requestId=42; threadId=$first.threadId; turnId=$first.turnId; answers=$answer }
         Assert ((Command $client $command).ok) 'First answer failed.'
         1..2 | ForEach-Object { [void](Read-Line $case.Process.StandardOutput) }
-        $case.Process.StandardInput.WriteLine('{"method":"mock/reuse"}')
+        Write-InputLine $case '{"method":"mock/reuse"}'
         Assert ((Read-Line $case.Process.StandardOutput).params.itemId -eq 'mock-item-2') 'Reused ID request missing.'
         $second = (Command $client @{ command='snapshot' }).pending[0]
         Assert ($second.requestToken -ne $first.requestToken) 'Reused ID retained token.'
@@ -209,13 +224,13 @@ try {
     1..3 | ForEach-Object { [void](Read-Line $case.Process.StandardOutput) }
     $client = Connect-Pipe $case.Pipe
     try {
-        $case.Process.StandardInput.WriteLine('{"method":"mock/resolve"}')
+        Write-InputLine $case '{"method":"mock/resolve"}'
         Assert ((Read-Line $case.Process.StandardOutput).method -eq 'serverRequest/resolved') 'Resolved event missing.'
         Assert ((Command $client @{ command='snapshot' }).pending.Count -eq 0) 'Resolved request not cleared.'
-        $case.Process.StandardInput.WriteLine('{"method":"mock/reuse"}')
+        Write-InputLine $case '{"method":"mock/reuse"}'
         [void](Read-Line $case.Process.StandardOutput)
         Assert ((Command $client @{ command='snapshot' }).pending.Count -eq 1) 'Second request missing.'
-        $case.Process.StandardInput.WriteLine('{"method":"mock/complete"}')
+        Write-InputLine $case '{"method":"mock/complete"}'
         Assert ((Read-Line $case.Process.StandardOutput).method -eq 'turn/completed') 'Turn completed missing.'
         Assert ((Command $client @{ command='snapshot' }).pending.Count -eq 0) 'Nested turn.id failed to clear pending.'
         $results += 'serverRequest/resolved and nested turn completion cleanup'
@@ -232,10 +247,10 @@ try {
         Assert ($first.requestId -ceq 'request-42') 'String request ID changed.'
         $bad = @{ command='answer'; connectionId=$first.connectionId; requestToken=$first.requestToken; requestId=42; threadId=$first.threadId; turnId=$first.turnId; answers=$answer }
         Assert ((Command $client $bad).error -eq 'stale') 'Numeric ID matched string ID.'
-        $case.Process.StandardInput.WriteLine('{"method":"turn/interrupt","params":{"threadId":"mock-thread","turnId":"mock-turn"}}')
+        Write-InputLine $case '{"method":"turn/interrupt","params":{"threadId":"mock-thread","turnId":"mock-turn"}}'
         Assert ((Read-Line $case.Process.StandardOutput).method -eq 'mock/received') 'Interruption request was not forwarded.'
         Assert ((Command $client @{ command='snapshot' }).pending.Count -eq 0) 'Interruption left request pending.'
-        $case.Process.StandardInput.WriteLine('{"method":"mock/reuse"}')
+        Write-InputLine $case '{"method":"mock/reuse"}'
         [void](Read-Line $case.Process.StandardOutput)
         $second = (Command $client @{ command='snapshot' }).pending[0]
         $bad.requestId = 'request-42'; $bad.requestToken = $second.requestToken
@@ -275,7 +290,7 @@ try {
         $second = Start-SameCase $case
         try {
             1..3 | ForEach-Object { [void](Read-Line $second.Process.StandardOutput) }
-            $second.Process.StandardInput.WriteLine('{"id":42,"result":{"answers":{}}}')
+            Write-InputLine $second '{"id":42,"result":{"answers":{}}}'
             Assert ((Read-Line $second.Process.StandardOutput).params.message.id -eq 42) 'Second instance native passthrough failed.'
             Assert ((Command $client @{ command='snapshot' }).pending.Count -eq 1) 'Second instance mixed into first pipe.'
             $results += 'same-config concurrent fallback and child CLI path'
@@ -285,3 +300,4 @@ try {
 
 $results | ForEach-Object { Write-Output ('PASS ' + $_) }
 Write-Output ('Test files: ' + $tempRoot)
+} finally { [Console]::InputEncoding = $originalInputEncoding }
