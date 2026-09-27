@@ -7,19 +7,37 @@ Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 $script:passed=0
 function Check($Value,$Message){if(-not $Value){throw ('FAIL: '+$Message)};$script:passed++;Write-Output ('PASS: '+$Message)}
 function Invoke-DisplayDialogChoice([int]$Choice,[int]$Seconds,[bool]$Fade,[int]$ExpectedInitial,[string]$Screenshot='') {
-    $state=@{clicked=$false;initial=-1}
+    $state=@{clicked=$false;initial=-1;error=$null;timedOut=$false}
+    $deadline=[DateTime]::UtcNow.AddSeconds(10)
     $dialogTimer=New-Object Windows.Forms.Timer;$dialogTimer.Interval=40
     $dialogTimer.Add_Tick({
         $dialog=@([Windows.Forms.Application]::OpenForms|Where-Object {$_.Text -eq '通知显示设置'})
         if($dialog.Count -ne 1 -or $state.clicked){return}
-        $state.clicked=$true;$state.initial=$dialog[0].Controls['DisplayDuration'].SelectedIndex
-        if($Screenshot){Save-UiScreenshot $dialog[0] $Screenshot}
-        $dialog[0].Controls['DisplayDuration'].SelectedIndex=$Choice
-        if($Choice -eq 5){$dialog[0].Controls['CustomSeconds'].Value=$Seconds}
-        $dialog[0].Controls['FadeAnimation'].Checked=$Fade
-        $dialog[0].Controls['SaveDisplay'].PerformClick()
+        $state.clicked=$true
+        try{
+            $state.initial=$dialog[0].Controls['DisplayDuration'].SelectedIndex
+            if($Screenshot){Save-UiScreenshot $dialog[0] $Screenshot}
+            $dialog[0].Controls['DisplayDuration'].SelectedIndex=$Choice
+            if($Choice -eq 5){$dialog[0].Controls['CustomSeconds'].Value=$Seconds}
+            $dialog[0].Controls['FadeAnimation'].Checked=$Fade
+            $dialog[0].Controls['SaveDisplay'].PerformClick()
+        }catch{
+            $state.error=$_
+            $dialog[0].Close()
+        }
     }.GetNewClosure())
-    try{$dialogTimer.Start();Show-NotificationDisplaySettings}finally{$dialogTimer.Stop();$dialogTimer.Dispose()}
+    $watchdog=New-Object Windows.Forms.Timer;$watchdog.Interval=100
+    $watchdog.Add_Tick({
+        if([DateTime]::UtcNow -lt $deadline){return}
+        $state.timedOut=$true
+        $dialog=@([Windows.Forms.Application]::OpenForms|Where-Object {$_.Text -eq '通知显示设置'})
+        if($dialog.Count -eq 1){$dialog[0].Close()}
+    }.GetNewClosure())
+    try{$watchdog.Start();$dialogTimer.Start();Show-NotificationDisplaySettings}finally{
+        $dialogTimer.Stop();$dialogTimer.Dispose();$watchdog.Stop();$watchdog.Dispose()
+    }
+    if($state.error){throw ('Display settings dialog callback failed: '+$state.error)}
+    if($state.timedOut){throw 'Display settings dialog did not close within 10 seconds'}
     Check ($state.clicked -and $state.initial -eq $ExpectedInitial) ('Display settings reopens with saved selection (actual='+$state.initial+', expected='+$ExpectedInitial+')')
 }
 $root=Join-Path ([IO.Path]::GetFullPath("$PSScriptRoot\..\test-results")) ('notifications-ui-'+[Guid]::NewGuid().ToString('N'))

@@ -5,73 +5,36 @@ on:
 jobs:
   test:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Test core on Windows PowerShell 5.1
+      - name: Test shortcut encoding on Windows PowerShell 5.1
         shell: powershell
-        run: ./tests/Test-Core.ps1
-      - name: Build portable archive
+        run: ./tests/Trace-ShortcutEncoding.ps1
+      - name: Run all controller checks in isolated PowerShell processes
+        timeout-minutes: 12
         shell: powershell
-        run: ./tests/Test-Instances.ps1 -Integration
-      - name: Test deployment lifecycle
-        shell: powershell
-        run: |
-          ./tests/Trace-ShortcutEncoding.ps1
-          ./tests/Test-Install.ps1
-      - name: Test tray lifecycle
-        shell: powershell
-        run: ./tests/Test-Controller.ps1
-      - name: Test 0.3 experience and configuration isolation
-        shell: powershell
-        run: |
-          ./tests/Test-Experience.ps1
-          ./tests/Test-DailyActions.ps1
-          ./tests/Test-Diagnostics.ps1
-          ./tests/Test-CompletionMonitor.ps1
-          ./tests/Test-CompletionNotifications.ps1
-          ./tests/Test-CompletionNavigation.ps1
-          ./tests/Test-QuickMenu.ps1
-      - name: Test 0.7 appearance, notifications and tray activation
-        shell: powershell
-        run: |
-          ./tests/Test-Appearance.ps1
-          ./tests/Test-NotificationToggle.ps1
-          ./tests/Test-TrayClick.ps1
-          ./tests/Test-TrayPopup.ps1
-          ./tests/Test-QuickPopup.ps1
-          ./tests/Test-FastRestore.ps1
-          ./tests/Test-HiddenActivation.ps1
-      - name: Test 0.8.3 question UI and notification fixes
-        shell: powershell
-        run: |
-          ./tests/Test-QuestionWindow.ps1
-          ./tests/Test-NotificationReturn.ps1
-          ./tests/Test-NoticeDeadline.ps1
-          ./tests/Test-NotificationShape.ps1
+        run: ./tests/Test-All.ps1
       - name: Test isolated question bridge with fixtures
+        timeout-minutes: 4
         shell: powershell
         run: |
-          ./experiments/notification-bridge/tests/Test-BridgeTransport.ps1
-          ./experiments/notification-bridge/tests/Test-TrialRecovery.ps1
-          ./experiments/notification-bridge/tests/Test-QuestionClient.ps1
-          ./experiments/notification-bridge/tests/Test-ControllerQuestions.ps1
-      - name: Test compiled controller interactions
-        shell: powershell
-        run: ./tests/Test-Host.ps1
-      - name: Test automatic setup and exit responsiveness
-        shell: powershell
-        run: |
-          ./tests/Test-Setup.ps1
-          ./tests/Test-ExitUi.ps1
-          ./tests/Test-Responsiveness.ps1
-      - name: Package
-        shell: powershell
-        run: ./tests/Test-Upgrade.ps1
+          foreach ($test in @('Test-BridgeTransport','Test-TrialRecovery','Test-QuestionClient','Test-ControllerQuestions')) {
+            & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "./experiments/notification-bridge/tests/$test.ps1"
+            if ($LASTEXITCODE -ne 0) { throw "$test failed with exit code $LASTEXITCODE" }
+          }
       - name: Build release
         shell: powershell
         run: |
           ./scripts/Build-Release.ps1
           ./scripts/Build-UpgradePackage.ps1
+      - name: Preserve validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-logs
+          path: test-results/validation-*/*.log
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: CodexDualLauncher-windows
