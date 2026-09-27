@@ -173,5 +173,5 @@ function Invoke-QuickPopupCommand($Command) {
             'close' {Show-ControlPanel;Invoke-PanelAction {Close-Instance $instance}}
             'quit' {$script:quittingController=$true;$context.ExitThread()}
         }
-    }catch{Set-UiMessage $_.Exception.Message;Show-ControlPanel;Show-Error $_}
+    }catch{Set-UiMessage $_.Exception.Message;if($Command.action -eq 'task'){Show-TaskNavigationFeedback $_.Exception.Message}else{Show-ControlPanel;Show-Error $_}}
 }

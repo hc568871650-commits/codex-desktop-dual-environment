@@ -28,16 +28,21 @@ function Initialize-PreferencesPage($Parent) {
 function Initialize-NotificationsPage($Parent) {
     $script:notificationsPage=New-Object Windows.Forms.Panel;$script:notificationsPage.SetBounds(208,18,608,462);$script:notificationsPage.Visible=$false;$Parent.Controls.Add($script:notificationsPage)
     $title=New-UiLabel $script:notificationsPage '通知' 0 0 580 52;$title.Font=New-Object Drawing.Font($Parent.Font.FontFamily,20,[Drawing.FontStyle]::Bold)
-    $note=New-UiLabel $script:notificationsPage '完成提醒、暂停和最近记录，都在这里管理。' 1 59 580 28;$note.Name='Muted'
+    $note=New-UiLabel $script:notificationsPage '待回答的问题、完成提醒和最近记录，都在这里。' 1 59 580 28;$note.Name='Muted'
     $surface=New-Object CodexDual.Surface;$surface.SetBounds(0,102,608,143);$script:notificationsPage.Controls.Add($surface)
     $script:notificationEnabled=New-Object CodexDual.QuietSwitch;$script:notificationEnabled.Text='任务完成时显示提醒';$script:notificationEnabled.SetBounds(20,14,360,32);$surface.Controls.Add($script:notificationEnabled)
     $script:notificationEnabled.Add_Click({param($sender,$e) Invoke-NotificationUiAction @{action='toggle';enabled=$sender.Checked}})
     $script:notificationPreview=New-UiButton $surface '预览通知' 460 14 126 {Invoke-NotificationUiAction @{action='preview'}};$script:notificationPreview.Height=34
-    $script:notificationStatus=New-UiLabel $surface '' 20 53 562 28;$script:notificationStatus.Name='Muted'
+    $script:notificationStatus=New-UiLabel $surface '' 20 53 414 28;$script:notificationStatus.Name='Muted'
+    $script:notificationDisplay=New-UiButton $surface '显示设置' 460 52 126 {Show-NotificationDisplaySettings};$script:notificationDisplay.Height=32
     $script:notificationPause15=New-UiButton $surface '暂停 15 分钟' 18 92 180 {Invoke-NotificationUiAction @{action='snooze';minutes=15}}
     $script:notificationPause60=New-UiButton $surface '暂停 1 小时' 214 92 180 {Invoke-NotificationUiAction @{action='snooze';minutes=60}}
     $script:notificationResume=New-UiButton $surface '恢复提醒' 410 92 178 {Invoke-NotificationUiAction @{action='snooze';minutes=0}}
-    [void](New-UiLabel $script:notificationsPage '最近完成' 0 261 340 28)
+    $script:notificationListMode='recent'
+    $script:pendingTab=New-UiButton $script:notificationsPage '待处理' 0 257 132 {$script:notificationListMode='pending';$script:notificationHistoryPage=0;Update-NotificationView -Force};$script:pendingTab.Quiet=$true
+    $script:recentTab=New-UiButton $script:notificationsPage '最近完成' 144 257 132 {$script:notificationListMode='recent';$script:notificationHistoryPage=0;Update-NotificationView -Force};$script:recentTab.Quiet=$true
+    $script:questionConnect=New-UiButton $script:notificationsPage '连接提问' 348 257 120 {if(Get-Command Select-QuestionBridge -ErrorAction SilentlyContinue){Select-QuestionBridge}};$script:questionConnect.Quiet=$true
+    $script:questionPreviewButton=New-UiButton $script:notificationsPage '预览提问' 480 257 128 {if(Get-Command Show-QuestionPreview -ErrorAction SilentlyContinue){Show-QuestionPreview}};$script:questionPreviewButton.Quiet=$true
     $script:clearNotificationHistory=New-UiButton $script:notificationsPage '清除记录' 480 257 128 {Invoke-NotificationUiAction @{action='clear'}};$script:clearNotificationHistory.Quiet=$true
     $script:notificationHistoryBody=New-Object Windows.Forms.Panel;$script:notificationHistoryBody.SetBounds(0,297,608,122);$script:notificationsPage.Controls.Add($script:notificationHistoryBody)
     $script:notificationHistoryPage=0;$script:notificationHistoryStamp=''
@@ -50,21 +55,29 @@ function Update-NotificationView([switch]$Force) {
     $ready=$script:completionReady
     $enabled=$ready -and $script:completionSettings.enabled
     $script:notificationEnabled.Enabled=$ready;$script:notificationEnabled.Checked=$enabled
-    $script:notificationPreview.Enabled=$ready;$script:notificationPause15.Enabled=$enabled;$script:notificationPause60.Enabled=$enabled
+    $script:notificationPreview.Enabled=$ready;$script:notificationDisplay.Enabled=$ready;$script:notificationPause15.Enabled=$enabled;$script:notificationPause60.Enabled=$enabled
     $script:notificationResume.Enabled=$enabled -and (Test-CompletionSnoozed)
     $script:notificationStatus.Text=if($ready){Get-CompletionStatusText}else{'通知暂不可用，请检查环境。'}
-    $entries=@($script:completionHistory);$pages=[Math]::Max(1,[int][Math]::Ceiling($entries.Count/2.0))
+    $pending=if(Get-Command Get-PendingQuestionEntries -ErrorAction SilentlyContinue){@(Get-PendingQuestionEntries)}else{@()}
+    $isPending=$script:notificationListMode -eq 'pending'
+    $script:pendingTab.Text='待处理'+$(if(@($pending).Count){' ('+@($pending).Count+')'}else{''});$script:pendingTab.Selected=$isPending;$script:recentTab.Selected=-not $isPending
+    $script:questionConnect.Visible=$isPending;$script:questionPreviewButton.Visible=$isPending;$script:clearNotificationHistory.Visible=-not $isPending
+    $entries=@(if($isPending){$pending}else{$script:completionHistory});$pages=[Math]::Max(1,[int][Math]::Ceiling($entries.Count/2.0))
     $script:notificationHistoryPage=[Math]::Max(0,[Math]::Min($script:notificationHistoryPage,$pages-1))
     $script:historyPrevious.Visible=$entries.Count -gt 0;$script:historyNext.Visible=$entries.Count -gt 0;$script:historyPrevious.Enabled=$script:notificationHistoryPage -gt 0;$script:historyNext.Enabled=$script:notificationHistoryPage -lt $pages-1
-    $script:historyCounter.Text=if($entries.Count){($script:notificationHistoryPage+1).ToString()+' / '+$pages+' · 共 '+$entries.Count+' 条'}else{'保留本次运行的最近 20 条完成记录'}
+    $script:historyCounter.Text=if($entries.Count){($script:notificationHistoryPage+1).ToString()+' / '+$pages+' · 共 '+$entries.Count+' 条'}elseif($isPending){if(Get-Variable questionStatus -Scope Script -ErrorAction SilentlyContinue){$script:questionStatus}else{'尚未连接提问服务'}}else{'保留本次运行的最近 20 条完成记录'}
     $script:clearNotificationHistory.Enabled=$entries.Count -gt 0
-    $stamp=($script:notificationHistoryPage.ToString()+'|'+(($entries|ForEach-Object {([string](Get-ObjectValue $_ 'threadId' ''))+':'+([string](Get-ObjectValue $_ 'title' ''))}) -join '|'))
+    $stamp=($script:notificationListMode+'|'+$script:notificationHistoryPage.ToString()+'|'+(($entries|ForEach-Object {([string](Get-ObjectValue $_ 'threadId' ''))+':'+([string](Get-ObjectValue $_ 'title' ''))+':'+([string](Get-ObjectValue $_ 'requestToken' ''))}) -join '|'))
     if(-not $Force -and $stamp -eq $script:notificationHistoryStamp){return};$script:notificationHistoryStamp=$stamp
     while($script:notificationHistoryBody.Controls.Count){$script:notificationHistoryBody.Controls[0].Dispose()}
-    if(-not $entries.Count){$empty=New-UiLabel $script:notificationHistoryBody '任务完成后，记录会出现在这里。' 2 21 596 54;$empty.Name='Muted'}
+    if(-not $entries.Count){$empty=New-UiLabel $script:notificationHistoryBody $(if($isPending){'暂时没有待处理的问题。提示收起后，可在这里继续回答。'}else{'任务完成后，记录会出现在这里。'}) 2 21 596 54;$empty.Name='Muted'}
     else{
         $y=0
         foreach($event in @($entries|Select-Object -Skip ($script:notificationHistoryPage*2) -First 2)){
+            if($isPending){
+                $row=New-Object CodexDual.QuickActionButton;$row.Text=([string]@($event.questions)[0].question -replace '[\p{Cc}\p{Cf}]',' ');$row.Detail='API · '+@($event.questions).Count+' 个问题 · 点击回答';$row.ActionIcon='bell';$row.SetBounds(0,$y,608,58);$row.Tag=[string]$event.requestToken
+                $row.Add_Click({param($sender,$e) Show-PendingQuestion ([string]$sender.Tag)});$script:notificationHistoryBody.Controls.Add($row);$y+=62;continue
+            }
             $instance=@($config.instances|Where-Object {$_.id -eq $event.instanceId});if($instance.Count -ne 1){continue}
             $row=New-Object CodexDual.QuickActionButton;$row.Text=([string](Get-ObjectValue $event 'title' '任务已完成') -replace '[\p{Cc}\p{Cf}]',' ');$row.ActionIcon='clock';$row.SetBounds(0,$y,608,58);$row.Tag=@{instance=$instance[0];threadId=$event.threadId}
             $row.Detail=Get-InstanceDisplayName $instance[0] $script:preferences
@@ -73,6 +86,42 @@ function Update-NotificationView([switch]$Force) {
         }
     }
     Set-UiTheme $script:notificationsPage
+}
+function Show-NotificationDisplaySettings {
+    $dialog=New-Object Windows.Forms.Form
+    $dialog.Text='通知显示设置';$dialog.FormBorderStyle='FixedDialog';$dialog.MaximizeBox=$false;$dialog.MinimizeBox=$false
+    $dialog.StartPosition='CenterParent';$dialog.ShowInTaskbar=$false;$dialog.ClientSize=New-Object Drawing.Size(420,228);$dialog.Font=$panel.Font
+    try{
+        [void](New-UiLabel $dialog '自动关闭' 20 18 122 28)
+        $choices=New-Object Windows.Forms.ComboBox;$choices.Name='DisplayDuration';$choices.DropDownStyle='DropDownList';$choices.SetBounds(150,16,244,30)
+        [void]$choices.Items.AddRange([object[]]@('3 秒','5 秒','10 秒','15 秒','30 秒','自定义','常驻，手动关闭'))
+        $dialog.Controls.Add($choices)
+        $custom=New-Object Windows.Forms.NumericUpDown;$custom.Name='CustomSeconds';$custom.Minimum=1;$custom.Maximum=3600;$custom.Value=15;$custom.SetBounds(150,60,108,28);$dialog.Controls.Add($custom)
+        $unit=New-UiLabel $dialog '秒 (1–3600)' 268 62 130 26;$unit.Name='Muted'
+        $seconds=[int]$script:completionSettings.displaySeconds
+        $index=(@(3,5,10,15,30).IndexOf($seconds))
+        if($seconds -eq 0){$index=6}elseif($index -lt 0){$index=5;$custom.Value=$seconds}
+        $choices.SelectedIndex=$index;$custom.Enabled=$index -eq 5
+        $choices.Add_SelectedIndexChanged({$custom.Enabled=$choices.SelectedIndex -eq 5}.GetNewClosure())
+        $animation=New-Object CodexDual.QuietSwitch;$animation.Name='FadeAnimation';$animation.Text='淡入淡出动画';$animation.Checked=[bool]$script:completionSettings.fadeEnabled
+        $animation.SetBounds(20,110,360,32);$dialog.Controls.Add($animation)
+        $cancel=New-UiButton $dialog '取消' 172 172 106 { $dialog.DialogResult=[Windows.Forms.DialogResult]::Cancel;$dialog.Close() }.GetNewClosure()
+        $save=New-UiButton $dialog '保存' 290 172 106 {
+            param($sender,$e)
+            $owner=$sender.FindForm()
+            $choices=$owner.Controls['DisplayDuration'];$custom=$owner.Controls['CustomSeconds'];$animation=$owner.Controls['FadeAnimation']
+            try{
+                $duration=if($choices.SelectedIndex -eq 6){0}elseif($choices.SelectedIndex -eq 5){[int]$custom.Value}else{@(3,5,10,15,30)[$choices.SelectedIndex]}
+                Set-CompletionDisplaySettings $duration $animation.Checked
+                $owner.DialogResult=[Windows.Forms.DialogResult]::OK;$owner.Close()
+                Update-NotificationView -Force;Set-UiMessage '通知显示设置已保存。'
+            }catch{Show-Error $_}
+        };$save.Name='SaveDisplay';$save.Primary=$true
+        $dialog.AcceptButton=$save
+        $dialog.CancelButton=$cancel
+        Set-UiTheme $dialog
+        [void]$dialog.ShowDialog($panel)
+    }finally{$dialog.Dispose()}
 }
 function Invoke-NotificationUiAction([hashtable]$Command) {
     try{
@@ -99,7 +148,7 @@ function Update-ControllerAppearance([switch]$Force) {
     if((Get-Variable quickPopup -Scope Script -ErrorAction SilentlyContinue) -and $script:quickPopup -and $script:quickPopup -notin $roots){$roots+=,$script:quickPopup}
     foreach($root in $roots){Mark-ThemeSemantics $root}
     $changed=[CodexDual.AppTheme]::SetAppearance($script:preferences.appearance.mode,$script:preferences.appearance.accent)
-    if($changed -or $Force){foreach($root in $roots){Set-UiTheme $root;$root.Invalidate($true)}}
+    if($changed -or $Force){foreach($root in $roots){Set-UiTheme $root;if($root -is [CodexDual.QuestionWindow]){$root.ApplyAppearance()};$root.Invalidate($true)}}
     Update-AppearanceControls
 }
 function Set-ControllerAppearance([ValidateSet('dark','light','system')][string]$Mode,[ValidateSet('neutral','blue','green','purple')][string]$Accent) {

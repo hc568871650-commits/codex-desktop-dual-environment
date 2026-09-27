@@ -41,6 +41,20 @@ jobs:
           ./tests/Test-QuickPopup.ps1
           ./tests/Test-FastRestore.ps1
           ./tests/Test-HiddenActivation.ps1
+      - name: Test 0.8.3 question UI and notification fixes
+        shell: powershell
+        run: |
+          ./tests/Test-QuestionWindow.ps1
+          ./tests/Test-NotificationReturn.ps1
+          ./tests/Test-NoticeDeadline.ps1
+          ./tests/Test-NotificationShape.ps1
+      - name: Test isolated question bridge with fixtures
+        shell: powershell
+        run: |
+          ./experiments/notification-bridge/tests/Test-BridgeTransport.ps1
+          ./experiments/notification-bridge/tests/Test-TrialRecovery.ps1
+          ./experiments/notification-bridge/tests/Test-QuestionClient.ps1
+          ./experiments/notification-bridge/tests/Test-ControllerQuestions.ps1
       - name: Test compiled controller interactions
         shell: powershell
         run: ./tests/Test-Host.ps1

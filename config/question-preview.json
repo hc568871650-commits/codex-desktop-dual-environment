@@ -1,0 +1,21 @@
+{
+  "connectionId": "preview",
+  "requestToken": "preview",
+  "requestId": 1,
+  "threadId": "preview",
+  "turnId": "preview",
+  "isBlocking": true,
+  "questions": [
+    {
+      "id": "display",
+      "header": "显示方式",
+      "question": "收到需要你回答的问题时，希望如何显示？",
+      "isOther": true,
+      "options": [
+        {"label": "显示提示卡片", "description": "卡片按设定时间收起，问题保留在通知页的待处理列表。"},
+        {"label": "常驻，手动关闭", "description": "提示保持显示，直到你选择查看或稍后处理。"}
+      ]
+    },
+    {"id": "note", "header": "补充说明", "question": "还有哪些希望保留的交互习惯？", "options": null}
+  ]
+}

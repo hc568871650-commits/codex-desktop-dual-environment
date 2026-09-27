@@ -1,6 +1,6 @@
 ﻿# UI helpers share the controller runspace. Instance IDs remain the action targets.
 if(-not ('CodexDual.ExitWaitDialog' -as [type])){Add-Type -Path "$PSScriptRoot\ExitWaitDialog.cs" -ReferencedAssemblies System.Windows.Forms,System.Drawing}
-if(-not ('CodexDual.QuietButton' -as [type])){Add-Type -Path "$PSScriptRoot\UiTheme.cs" -ReferencedAssemblies System.Windows.Forms,System.Drawing}
+if(-not ('CodexDual.QuietButton' -as [type])){Add-Type -Path @("$PSScriptRoot\UiTheme.cs","$PSScriptRoot\QuestionWindow.cs") -ReferencedAssemblies System.Windows.Forms,System.Drawing,System.Web.Extensions}
 if(-not ('CodexDual.BackgroundWork' -as [type])){Add-Type -Path "$PSScriptRoot\BackgroundWork.cs" -ReferencedAssemblies System.Management.Automation,System.Windows.Forms}
 function Set-UiTheme($Control) {
     [CodexDual.AppTheme]::ApplyTo($Control)
@@ -17,6 +17,7 @@ function New-UiTextBox($Parent,[int]$X,[int]$Y,[int]$Width) {
 }
 function Set-UiMessage([string]$Message) {$script:feedback.Text=$Message}
 $script:openBusy=$false
+$script:openFromNotification=$false
 function Invoke-PanelAction([scriptblock]$Action) {
     if($script:uiBusy -or $script:openBusy){return}
     $script:uiBusy=$true;$panel.UseWaitCursor=$true
@@ -236,15 +237,16 @@ function Open-PanelInstance($Instance) {
 function Open-BothPanelInstances {
     Start-PanelOpen @('official','api')
 }
-function Start-PanelOpen([string[]]$Roles,[string]$ThreadId='') {
+function Start-PanelOpen([string[]]$Roles,[string]$ThreadId='',[switch]$FromNotification) {
     if($script:openBusy){return}
+    $script:openFromNotification=[bool]$FromNotification
     Set-PanelOpenBusy $true
     Set-UiMessage '正在打开窗口… 面板仍可移动或收起。'
     $operation=if($ThreadId){'task'}else{'open'}
     $knownInstances=@{}
     foreach($role in $Roles){$cached=Get-ObjectValue $script:statusCache $role $null;if($cached -and $cached.State -eq 'Running' -and (Get-ObjectValue $cached 'InstanceId' '')){$knownInstances[$role]=$cached}}
     try{$script:openWork.Start($script:workCode,[object[]]@($PSScriptRoot,$ConfigPath,$operation,$Roles,$ThreadId,$knownInstances))}
-    catch{Set-PanelOpenBusy $false;throw}
+    catch{$script:openFromNotification=$false;Set-PanelOpenBusy $false;throw}
 }
 function Get-UiActionControls($Parent) {
     foreach($child in $Parent.Controls){
@@ -292,9 +294,16 @@ function Receive-PanelOpen {
             catch{$lines+=($name+'：'+$_.Exception.Message);$needsAttention=$true}
         }
         Set-UiMessage ($lines -join [Environment]::NewLine)
-        if($needsAttention -and -not $panel.Visible){Show-ControlPanel}
-    }catch{Set-UiMessage $_.Exception.Message;if(-not $panel.Visible){Show-ControlPanel}}
-    finally{Set-PanelOpenBusy $false;$script:statusRequested=[DateTime]::MinValue;Update-PanelStatus}
+        if($needsAttention){
+            if($script:openFromNotification){if(Get-Command Show-TaskNavigationFeedback -ErrorAction SilentlyContinue){Show-TaskNavigationFeedback ($lines -join [Environment]::NewLine)}}
+            elseif(-not $panel.Visible){Show-ControlPanel}
+        }
+    }catch{
+        Set-UiMessage $_.Exception.Message
+        if($script:openFromNotification){if(Get-Command Show-TaskNavigationFeedback -ErrorAction SilentlyContinue){Show-TaskNavigationFeedback $_.Exception.Message}}
+        elseif(-not $panel.Visible){Show-ControlPanel}
+    }
+    finally{$script:openFromNotification=$false;Set-PanelOpenBusy $false;$script:statusRequested=[DateTime]::MinValue;Update-PanelStatus}
 }
 function Show-InstanceDirectoryMenu($Instance,$Button) {
     $folders=New-Object CodexDual.QuietMenu

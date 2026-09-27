@@ -13,6 +13,7 @@ Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 . "$PSScriptRoot\Diagnostics.ps1"
 . "$PSScriptRoot\Panel.ps1"
 . "$PSScriptRoot\CompletionNotifications.ps1"
+. "$PSScriptRoot\PendingQuestions.ps1"
 . "$PSScriptRoot\TrayMenu.ps1"
 . "$PSScriptRoot\QuickPopup.ps1"
 . "$PSScriptRoot\WorkspacePages.ps1"
@@ -214,6 +215,8 @@ try {
             catch{$completionMenu.Checked=$script:completionSettings.enabled;Show-Error $_}
         })
         $notificationEnabled.Enabled=$script:completionReady;if($script:completionReady){$notificationEnabled.Checked=$script:completionSettings.enabled}
+        Initialize-PendingQuestions
+        $pendingMenu=New-Object Windows.Forms.ToolStripMenuItem('待处理问题');$pendingMenu.Add_Click({$menu.Close();$script:notificationListMode='pending';Show-ControlPanel;Show-WorkspacePage 'notifications'});$menu.Items.Insert(4,$pendingMenu)
         Initialize-QuickMenu;Initialize-QuickPopup;Update-ControllerAppearance -Force;Update-NotificationView -Force
         $panelEvent=New-Object Threading.EventWaitHandle($false,[Threading.EventResetMode]::AutoReset,$eventName)
         $configureEvent=New-Object Threading.EventWaitHandle($false,[Threading.EventResetMode]::AutoReset,($eventName+'.Configure'))
@@ -221,6 +224,7 @@ try {
             if($script:uiBusy){return};if($panelEvent.WaitOne(0)){Show-ControlPanel}
             if(-not $script:openBusy -and $configureEvent.WaitOne(0)){Show-ControlPanel;Show-ApiManager}
             if($script:openWork.Completed){Receive-PanelOpen}
+            Update-PendingQuestions
             $script:completionTicks++;if($script:completionReady -and $script:completionTicks -ge 20){$script:completionTicks=0;Update-CompletionNotifications;Update-NotificationView;if($script:preferences.appearance.mode -eq 'system'){Update-ControllerAppearance};Refresh-QuickPopupState}
             $script:refreshTicks++;if($script:statusWork.Completed -or (($panel.Visible -or $menu.Visible -or $script:quickPopup.Visible) -and $script:refreshTicks -ge 40)){$script:refreshTicks=0;Update-PanelStatus}
         });$panelTimer.Start()
@@ -269,5 +273,5 @@ try {
             $script:quickPopup.Hide()
             }
         }else{if($Action -in @('panel','configure')){Show-ControlPanel};if($LifecycleObserver){$LifecycleObserver.Invoke('ready-'+$Action)};if($Action -eq 'configure'){Show-ApiManager};[Windows.Forms.Application]::Run($context)}
-    }finally{if($script:quickPopup){$script:quickPopup.Dispose()};if($menu){$menu.Dispose()};if($trayClick){$trayClick.Dispose()};if($panelTimer){$panelTimer.Stop();$panelTimer.Dispose()};if($script:statusWork){$script:statusWork.Dispose()};if($script:openWork){$script:openWork.Dispose()};if($script:completionReady){Dispose-CompletionNotifications};if($panelEvent){$panelEvent.Dispose()};if($configureEvent){$configureEvent.Dispose()};if($panel){$panel.Dispose()};if($tray){$tray.Visible=$false;$tray.Dispose()};if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
+    }finally{Dispose-PendingQuestions;if($script:quickPopup){$script:quickPopup.Dispose()};if($menu){$menu.Dispose()};if($trayClick){$trayClick.Dispose()};if($panelTimer){$panelTimer.Stop();$panelTimer.Dispose()};if($script:statusWork){$script:statusWork.Dispose()};if($script:openWork){$script:openWork.Dispose()};if($script:completionReady){Dispose-CompletionNotifications};if($panelEvent){$panelEvent.Dispose()};if($configureEvent){$configureEvent.Dispose()};if($panel){$panel.Dispose()};if($tray){$tray.Visible=$false;$tray.Dispose()};if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
 }catch{if($LifecycleObserver){$LifecycleObserver.Invoke('failed-'+$_.Exception.GetType().FullName)};if($Action -eq 'status' -or $SmokeTest){throw};Show-Error $_;exit 1}

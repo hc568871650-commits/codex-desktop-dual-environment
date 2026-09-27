@@ -14,7 +14,7 @@ $panel=New-Object Windows.Forms.Form;$panel.Font=New-Object Drawing.Font('Micros
 $script:feedbackCount=0
 function Set-UiMessage([string]$Message){$script:lastFeedback=$Message;$script:feedbackCount++}
 function Open-PanelInstance($Instance){$script:opened+=$Instance.id}
-function Start-PanelOpen([string[]]$Roles,[string]$ThreadId){$script:opened+=$ThreadId}
+function Start-PanelOpen([string[]]$Roles,[string]$ThreadId,[switch]$FromNotification){$script:opened+=$ThreadId}
 
 # This test replaces the launch boundary with an inert, controller-owned sleep process.
 # NotificationWorker.ps1 and user instances are never launched.

@@ -2,14 +2,20 @@
 if(-not ('CodexDual.CompletionCard' -as [type])){Add-Type -Path "$PSScriptRoot\CompletionCard.cs" -ReferencedAssemblies System.Windows.Forms,System.Drawing -WarningAction SilentlyContinue}
 
 . "$PSScriptRoot\CompletionNavigation.ps1"
+$script:navigationFeedback=$null
 function Read-CompletionSettings($Config) {
     $path=Join-Path $Config.stateDirectory 'notifications\settings.local.json';Assert-NoReparsePoint $path
     if(Test-Path -LiteralPath $path){
         $value=Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json
         if($value.schema -ne 1 -or $value.enabled -isnot [bool] -or $value.epoch -notmatch '^[a-f0-9]{32}$'){throw '独立通知设置无法读取，请检查通知设置文件。'}
+        $duration=Get-ObjectValue $value 'displaySeconds' 15
+        $fade=Get-ObjectValue $value 'fadeEnabled' $false
+        if($duration -isnot [int] -or $duration -lt 0 -or $duration -gt 3600 -or $fade -isnot [bool]){throw '通知显示设置无效，请检查通知设置文件。'}
+        $value|Add-Member NoteProperty displaySeconds $duration -Force
+        $value|Add-Member NoteProperty fadeEnabled $fade -Force
         return $value
     }
-    return [pscustomobject]@{schema=1;enabled=$true;epoch=[Guid]::NewGuid().ToString('N')}
+    return [pscustomobject]@{schema=1;enabled=$true;epoch=[Guid]::NewGuid().ToString('N');displaySeconds=15;fadeEnabled=$false}
 }
 function Save-CompletionSettings($Config,$Settings){
     $path=Join-Path $Config.stateDirectory 'notifications\settings.local.json';Assert-NoReparsePoint $path
@@ -61,9 +67,11 @@ function Update-RetiringCompletionWorkers {
 }
 function Update-CompletionCardLayout {
     for($n=$script:completionCards.Count-1;$n -ge 0;$n--){if($script:completionCards[$n].IsDisposed){$script:completionCards.RemoveAt($n)}}
-    if($script:completionCards.Count){Set-NotificationCardLayout @($script:completionCards.ToArray()) $script:completionArea}else{$script:completionArea=$null}
+    $cards=@($script:completionCards.ToArray())
+    if((Get-Variable questionNotice -Scope Script -ErrorAction SilentlyContinue) -and $script:questionNotice -and -not $script:questionNotice.IsDisposed -and $script:questionNotice.Visible){$cards+=,$script:questionNotice}
+    if($cards.Count){if(-not $script:completionArea){$script:completionArea=[Windows.Forms.Screen]::FromPoint([Windows.Forms.Cursor]::Position).WorkingArea};Set-NotificationCardLayout $cards $script:completionArea}else{$script:completionArea=$null}
 }
-function Close-CompletionCards {foreach($card in @($script:completionCards.ToArray())){$card.Close();$card.Dispose()};$script:completionCards.Clear();$script:completionArea=$null}
+function Close-CompletionCards {foreach($card in @($script:completionCards.ToArray())){$card.Close();$card.Dispose()};$script:completionCards.Clear();$script:completionArea=$null;if((Get-Variable questionNotice -Scope Script -ErrorAction SilentlyContinue) -and $script:questionNotice -and -not $script:questionNotice.IsDisposed){$script:questionNotice.Close()};if($script:navigationFeedback -and -not $script:navigationFeedback.IsDisposed){$script:navigationFeedback.Close()}}
 function Test-CompletionSnoozed {
     $until=[string](Get-ObjectValue $script:completionSettings 'snoozedUntilUtc' '')
     if(-not $until){return $false}
@@ -76,9 +84,30 @@ function Set-CompletionSnooze([ValidateSet(0,15,60)][int]$Minutes) {
     Save-CompletionSettings $config $script:completionSettings
     if($Minutes){Close-CompletionCards}
 }
+function Set-CompletionDisplaySettings([int]$Seconds,[bool]$FadeEnabled) {
+    if($Seconds -lt 0 -or $Seconds -gt 3600){throw '显示时间应为 1–3600 秒，或选择常驻。'}
+    $next=[pscustomobject]@{}
+    foreach($property in $script:completionSettings.PSObject.Properties){$next|Add-Member NoteProperty $property.Name $property.Value}
+    $next.displaySeconds=$Seconds;$next.fadeEnabled=$FadeEnabled
+    Save-CompletionSettings $config $next
+    $script:completionSettings=$next
+    foreach($card in @($script:completionCards.ToArray())){$card.SetDisplaySettings($Seconds*1000,$FadeEnabled)}
+    if((Get-Variable questionNotice -Scope Script -ErrorAction SilentlyContinue) -and $script:questionNotice -and -not $script:questionNotice.IsDisposed){$script:questionNotice.SetDisplaySettings($Seconds*1000,$FadeEnabled)}
+}
 function Open-CompletionTarget($Instance,[string]$ThreadId) {
-    if(Test-TaskIdentifier $ThreadId){Start-PanelOpen @($Instance.role) $ThreadId}
-    else{Open-PanelInstance $Instance}
+    try{Start-PanelOpen @($Instance.role) $(if(Test-TaskIdentifier $ThreadId){$ThreadId}else{''}) -FromNotification}
+    catch{Show-TaskNavigationFeedback $_.Exception.Message}
+}
+function Show-TaskNavigationFeedback([string]$Message) {
+    if((Get-Variable navigationFeedback -Scope Script -ErrorAction SilentlyContinue) -and $script:navigationFeedback -and -not $script:navigationFeedback.IsDisposed){$script:navigationFeedback.Dispose()}
+    $card=New-Object CodexDual.CompletionCard;$script:navigationFeedback=$card
+    $card.Text='返回任务';$card.ShowInTaskbar=$false;$card.TopMost=$true;$card.StartPosition='Manual';$card.ClientSize=New-Object Drawing.Size(420,166);$card.Font=$panel.Font
+    $heading=New-UiLabel $card '返回任务' 20 14 365 26;$heading.Font=New-Object Drawing.Font($panel.Font.FontFamily,11,[Drawing.FontStyle]::Bold)
+    $body=New-UiLabel $card $Message 20 46 377 66;$body.AutoEllipsis=$true
+    [void](New-UiButton $card '知道了' 280 120 117 {param($sender,$e) $sender.FindForm().Close()})
+    if((Get-Variable completionReady -Scope Script -ErrorAction SilentlyContinue) -and $script:completionReady){$card.SetDisplaySettings(([int]$script:completionSettings.displaySeconds*1000),[bool]$script:completionSettings.fadeEnabled)}
+    $area=[Windows.Forms.Screen]::FromPoint([Windows.Forms.Cursor]::Position).WorkingArea
+    $card.Location=New-Object Drawing.Point(($area.Right-$card.Width-20),($area.Bottom-$card.Height-20));Set-UiTheme $card;$card.Show()
 }
 function Show-CompletionCard($Instance,$Event=$null) {
     $preview=[bool](Get-ObjectValue $Event 'preview' $false)
@@ -86,6 +115,7 @@ function Show-CompletionCard($Instance,$Event=$null) {
     foreach($old in @($script:completionCards.ToArray())){if($old.Tag -eq $cardTag){$old.Close();$old.Dispose()}}
     if(-not $script:completionArea){$script:completionArea=[Windows.Forms.Screen]::FromPoint([Windows.Forms.Cursor]::Position).WorkingArea}
     $card=New-Object CodexDual.CompletionCard;$card.Text=(Get-InstanceDisplayName $Instance $script:preferences)+$(if($preview){' · 通知预览'}else{' · 任务完成'});$card.Tag=$cardTag
+    $card.SetDisplaySettings(([int]$script:completionSettings.displaySeconds*1000),([bool]$script:completionSettings.fadeEnabled))
     if($preview){$card.Name='CompletionPreview'}
     $card.ClientSize=New-Object Drawing.Size(420,192);$card.ShowInTaskbar=$false;$card.TopMost=$true;$card.Font=$panel.Font;$card.StartPosition='Manual'
     $card.ThreadId=[string](Get-ObjectValue $Event 'threadId' '')
@@ -110,7 +140,10 @@ function Show-CompletionCard($Instance,$Event=$null) {
             param($sender,$e)
             $pause=New-Object CodexDual.QuietMenu
             foreach($minutes in @(15,60)){$item=$pause.Items.Add(('暂停 '+$minutes+' 分钟'));$item.Tag=$minutes;$item.Add_Click({param($sender,$e) Set-CompletionSnooze ([int]$sender.Tag)})}
-            if($sender.ContextMenuStrip){$sender.ContextMenuStrip.Dispose()};$sender.ContextMenuStrip=$pause;$pause.Show($sender,(New-Object Drawing.Point(0,$sender.Height)))
+            if($sender.ContextMenuStrip){$sender.ContextMenuStrip.Dispose()};$sender.ContextMenuStrip=$pause
+            $owner=$sender.FindForm();$owner.PauseDismissal=$true
+            $pause.Add_Closed({param($menu,$args) if(-not $owner.IsDisposed){$owner.PauseDismissal=$false}}.GetNewClosure())
+            $pause.Show($sender,(New-Object Drawing.Point(0,$sender.Height)))
         })
     }
     $dismiss=New-UiButton $card '×' 366 10 38 {param($sender,$e) $sender.FindForm().Close()};$dismiss.Quiet=$true;$dismiss.AccessibleName='关闭提示'

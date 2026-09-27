@@ -70,6 +70,15 @@ try{
     Click-Button $previewHandle '关闭预览'
     Wait-Condition {[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 通知预览') -eq 0} 'preview dismissed'
     Check $true 'Preview opens and closes without launching either fixture environment'
+    Click-Button $element '显示设置'
+    Wait-Condition {[CodexDualTests.HostAutomation]::FindDialog($process.Id,'通知显示设置') -ne 0} 'display settings visible'
+    $displayDialog=[CodexDualTests.HostAutomation]::FindDialog($process.Id,'通知显示设置')
+    $duration=@([CodexDualTests.HostAutomation]::Children($displayDialog,'COMBOBOX',$null))
+    Check ($duration.Count -eq 1) 'Compiled host exposes notification duration control'
+    [CodexDualTests.HostAutomation]::SelectComboIndex($duration[0],1)
+    Click-Button $displayDialog '保存'
+    Wait-Condition {(Get-Content (Join-Path $install 'state\notifications\settings.local.json') -Raw|ConvertFrom-Json).displaySeconds -eq 5} 'compiled-host duration saved'
+    Check ([CodexDualTests.HostAutomation]::FindDialog($process.Id,'通知显示设置') -eq 0 -and [CodexDualTests.HostAutomation]::FindDialog($process.Id,'Microsoft .NET Framework') -eq 0) 'Display settings save resolves controller functions without closure errors'
     Click-Button $element '任务完成时显示提醒'
     Wait-Condition {-not (Get-Content (Join-Path $install 'state\notifications\settings.local.json') -Raw|ConvertFrom-Json).enabled} 'notification disabled from dedicated page'
     Check ([CodexDualTests.HostAutomation]::Responds($main.Handle)) 'Panel remains responsive while stopping notification worker'

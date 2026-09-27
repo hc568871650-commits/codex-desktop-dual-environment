@@ -48,6 +48,14 @@ namespace CodexDualTests {
   }
   public static void Click(long handle) {if(!PostMessage(new IntPtr(handle),0xF5,IntPtr.Zero,IntPtr.Zero))throw new InvalidOperationException("Cannot post button click");}
   public static void SetText(long handle,string text) {SendMessage(new IntPtr(handle),0xC,IntPtr.Zero,text);}
+  [DllImport("user32.dll",EntryPoint="SendMessageW")] static extern IntPtr SendMessageValue(IntPtr h,uint msg,IntPtr w,IntPtr l);
+  [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr h);
+  [DllImport("user32.dll")] static extern int GetDlgCtrlID(IntPtr h);
+  public static void SelectComboIndex(long handle,int index) {
+   var h=new IntPtr(handle);
+   if(SendMessageValue(h,0x14E,new IntPtr(index),IntPtr.Zero).ToInt32()!=index)throw new InvalidOperationException("Combo selection failed");
+   SendMessageValue(GetParent(h),0x111,new IntPtr((1<<16)|(GetDlgCtrlID(h)&0xffff)),h);
+  }
   // WM_SYSCOMMAND/SC_CLOSE matches the title-bar X. Bare WM_CLOSE is classified
   // as TaskManagerClosing by .NET Framework and intentionally disposes a form.
   public static void CloseLikeUser(long handle) {
