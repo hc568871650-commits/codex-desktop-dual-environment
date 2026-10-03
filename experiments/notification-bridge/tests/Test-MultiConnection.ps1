@@ -32,7 +32,12 @@ function Barrier($case){Send $case @{method='mock/barrier'};return Read $case}
 function Question {return @{id=10;method='item/tool/requestUserInput';params=@{threadId='same-thread';turnId='same-turn';itemId='same-item';questions=@(@{id='q';header='synthetic';question='Choose B';options=@(@{label='A';description=''},@{label='B';description=''})})}}}
 function Answer($client,$pending){$command=@{command='answer';requestId=$pending.requestId;connectionId=$pending.connectionId;requestToken=$pending.requestToken;threadId=$pending.threadId;turnId=$pending.turnId;answers=@{q=@{answers=@('B')}}};if(-not $client.StartAnswer(($command|ConvertTo-Json -Depth 30 -Compress),$pending.requestToken)){throw 'Client answer busy'};return AwaitReply $client}
 $client=$null
+$originalInputEncoding=[Console]::InputEncoding
 try {
+ # .NET Framework constructs Process.StandardInput from Console.InputEncoding.
+ # Its default writer can emit a BOM even when our explicit writer is BOM-free;
+ # the proxy's native fallback must receive the same JSON bytes as normal mode.
+ [Console]::InputEncoding=New-Object Text.UTF8Encoding($false)
  $first=StartCase;$second=StartCase
  $deadline=[DateTime]::UtcNow.AddSeconds(5)
  do{$records=@(Get-ChildItem (Join-Path $root 'connections') -Filter '*.json' -ErrorAction SilentlyContinue);if($records.Count -eq 2){break};Start-Sleep -Milliseconds 20}while([DateTime]::UtcNow -lt $deadline)
@@ -101,4 +106,5 @@ try {
 }finally{
  if($client){$client.Dispose()}
  foreach($case in $cases){try{if(-not $case.Process.HasExited){$case.Writer.Close();if(-not $case.Process.WaitForExit(5000)){$case.Process.Kill();$case.Process.WaitForExit()}}}catch{};try{$case.Process.Dispose()}catch{}}
+ [Console]::InputEncoding=$originalInputEncoding
 }
