@@ -1,6 +1,9 @@
 param(
     [string]$CliPath='C:\Users\Administrator\AppData\Local\OpenAI\Codex\bin\faa963e871dd422c\codex.exe',
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [ValidateSet('mirror','sync','async')][string]$Mode='mirror',
+    [switch]$CodeModeHost,
+    [switch]$MultiConnection
 )
 $ErrorActionPreference='Stop'
 if($PSVersionTable.PSEdition -ne 'Desktop'){throw 'Use Windows PowerShell 5.1.'}
@@ -22,6 +25,6 @@ try{
     $build=$compiler.CompileAssemblyFromFile($options,(Join-Path $PSScriptRoot 'RealCliQuestionFixture.cs'))
     if($build.Errors.HasErrors){throw ($build.Errors|Out-String)}
 }finally{$compiler.Dispose()}
-& $options.OutputAssembly $CliPath $bridge $OutputDirectory
+& $options.OutputAssembly $CliPath $bridge $OutputDirectory $Mode ([string]$CodeModeHost.IsPresent) ([string]$MultiConnection.IsPresent)
 if($LASTEXITCODE -ne 0){throw "Real CLI fixture failed. Evidence: $(Join-Path $OutputDirectory 'failure.json')"}
 Write-Output "Evidence: $(Join-Path $OutputDirectory 'evidence.json')"

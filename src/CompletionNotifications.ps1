@@ -95,36 +95,55 @@ function Set-CompletionDisplaySettings([int]$Seconds,[bool]$FadeEnabled) {
     if((Get-Variable questionNotice -Scope Script -ErrorAction SilentlyContinue) -and $script:questionNotice -and -not $script:questionNotice.IsDisposed){$script:questionNotice.SetDisplaySettings($Seconds*1000,$FadeEnabled)}
 }
 function Open-CompletionTarget($Instance,[string]$ThreadId) {
+    $Instance=Get-ApiFeatureInstance $config ([string](Get-ObjectValue $Instance 'id' ''))
+    if(-not $Instance){return}
     try{Start-PanelOpen @($Instance.role) $(if(Test-TaskIdentifier $ThreadId){$ThreadId}else{''}) -FromNotification}
     catch{Show-TaskNavigationFeedback $_.Exception.Message}
 }
 function Show-TaskNavigationFeedback([string]$Message) {
-    if((Get-Variable navigationFeedback -Scope Script -ErrorAction SilentlyContinue) -and $script:navigationFeedback -and -not $script:navigationFeedback.IsDisposed){$script:navigationFeedback.Dispose()}
-    $card=New-Object CodexDual.CompletionCard;$script:navigationFeedback=$card
-    $card.Text='返回任务';$card.ShowInTaskbar=$false;$card.TopMost=$true;$card.StartPosition='Manual';$card.ClientSize=New-Object Drawing.Size(420,166);$card.Font=$panel.Font
-    $heading=New-UiLabel $card '返回任务' 20 14 365 26;$heading.Font=New-Object Drawing.Font($panel.Font.FontFamily,11,[Drawing.FontStyle]::Bold)
-    $body=New-UiLabel $card $Message 20 46 377 66;$body.AutoEllipsis=$true
-    [void](New-UiButton $card '知道了' 280 120 117 {param($sender,$e) $sender.FindForm().Close()})
+    Close-CompletionCards
+    $card=New-CompactNoticeCard '返回任务' '无法打开任务' $Message {param($sender,$e) $sender.FindForm().Close()} '关闭提示'
+    $script:navigationFeedback=$card
     if((Get-Variable completionReady -Scope Script -ErrorAction SilentlyContinue) -and $script:completionReady){$card.SetDisplaySettings(([int]$script:completionSettings.displaySeconds*1000),[bool]$script:completionSettings.fadeEnabled)}
     $area=[Windows.Forms.Screen]::FromPoint([Windows.Forms.Cursor]::Position).WorkingArea
     $card.Location=New-Object Drawing.Point(($area.Right-$card.Width-20),($area.Bottom-$card.Height-20));Set-UiTheme $card;$card.Show()
 }
+function New-CompactNoticeCard([string]$WindowTitle,[string]$Summary,[string]$Title,[scriptblock]$OpenAction,[string]$AccessibleAction='打开') {
+    $card=New-Object CodexDual.CompletionCard;$card.Text=$WindowTitle
+    $titleFont=New-Object Drawing.Font($panel.Font.FontFamily,($panel.Font.Size+2.5),[Drawing.FontStyle]::Bold)
+    try{$measured=[Windows.Forms.TextRenderer]::MeasureText($Title,$titleFont,(New-Object Drawing.Size(380,1000)),[Windows.Forms.TextFormatFlags]'WordBreak,NoPrefix')}finally{$titleFont.Dispose()}
+    $height=[Math]::Max(100,[Math]::Min(184,$measured.Height+72))
+    $card.ClientSize=New-Object Drawing.Size(420,$height);$card.ShowInTaskbar=$false;$card.TopMost=$true;$card.Font=$panel.Font;$card.StartPosition='Manual'
+    $status=New-UiLabel $card $Summary 20 12 344 24;$status.Name='Muted';$status.Font=New-Object Drawing.Font($panel.Font.FontFamily,9)
+    $status.Cursor='Hand';$status.Add_Click($OpenAction)
+    $body=New-Object CodexDual.NoticeBody;$body.Text=$Title;$body.Font=$panel.Font;$body.AccessibleDescription=$Summary
+    $body.SetBounds(8,38,404,($height-46));$body.Anchor='Top,Bottom,Left,Right';$body.AccessibleName=$AccessibleAction+'：'+$Title;$body.TabIndex=0
+    $body.Add_Click($OpenAction);$card.Controls.Add($body);$card.AcceptButton=$body
+    $card.Add_Click({param($sender,$e) $sender.Controls['NoticeBody'].PerformClick()})
+    $dismiss=New-UiButton $card '×' 376 8 30 {param($sender,$e) $sender.FindForm().Close()}
+    $dismiss.Name='DismissNotice';$dismiss.Height=28;$dismiss.Quiet=$true;$dismiss.AccessibleName='关闭提示';$dismiss.Anchor='Top,Right';$dismiss.TabIndex=1
+    $dismiss.BringToFront();$card.CancelButton=$dismiss
+    Set-UiTheme $card
+    return $card
+}
+function Test-CompletionForeground($Instance) {
+    try {
+        $executable=Find-CodexExecutable ([string](Get-ObjectValue $Instance 'executable' ''))
+        return [CodexDual.Native]::IsInstanceForeground($executable,[string](Get-ObjectValue $Instance 'home' ''),[string](Get-ObjectValue $Instance 'profile' ''))
+    } catch { return $false }
+}
 function Show-CompletionCard($Instance,$Event=$null) {
+    $Instance=Get-ApiFeatureInstance $config ([string](Get-ObjectValue $Instance 'id' ''))
+    if(-not $Instance){return}
     $preview=[bool](Get-ObjectValue $Event 'preview' $false)
+    # Keep history/consumption intact, but don't interrupt someone already using
+    # this API instance. Explicit previews and actionable questions stay visible.
+    if(-not $preview -and (Test-CompletionForeground $Instance)){return}
     $cardTag=if($preview){'preview'}else{$Instance.id}
-    foreach($old in @($script:completionCards.ToArray())){if($old.Tag -eq $cardTag){$old.Close();$old.Dispose()}}
+    Close-CompletionCards
     if(-not $script:completionArea){$script:completionArea=[Windows.Forms.Screen]::FromPoint([Windows.Forms.Cursor]::Position).WorkingArea}
-    $card=New-Object CodexDual.CompletionCard;$card.Text=(Get-InstanceDisplayName $Instance $script:preferences)+$(if($preview){' · 通知预览'}else{' · 任务完成'});$card.Tag=$cardTag
-    $card.SetDisplaySettings(([int]$script:completionSettings.displaySeconds*1000),([bool]$script:completionSettings.fadeEnabled))
-    if($preview){$card.Name='CompletionPreview'}
-    $card.ClientSize=New-Object Drawing.Size(420,192);$card.ShowInTaskbar=$false;$card.TopMost=$true;$card.Font=$panel.Font;$card.StartPosition='Manual'
-    $card.ThreadId=[string](Get-ObjectValue $Event 'threadId' '')
-    $card.Add_FormClosed({param($sender,$e) [void]$script:completionCards.Remove($sender);Update-CompletionCardLayout})
-    $header=New-UiLabel $card ('Codex · '+(Get-InstanceDisplayName $Instance $script:preferences)) 20 16 325 24;$header.AutoEllipsis=$true
     $title=[string](Get-ObjectValue $Event 'title' '任务已完成');if(-not $title){$title='任务已完成'}
     $title=($title -replace '[\p{Cc}\p{Cf}]',' ').Trim();if($title.Length -gt 100){$title=$title.Substring(0,99)+'…'}
-    $heading=New-UiLabel $card $title 20 49 380 29;$heading.AutoEllipsis=$true;$heading.Font=New-Object Drawing.Font($panel.Font.FontFamily,12,[Drawing.FontStyle]::Bold)
-    $description=New-UiLabel $card $(if($preview){'这是 API 端任务完成通知的预览。'}else{'任务已完成，点击查看结果。'}) 20 87 380 25
     $openAction={
         param($sender,$e)
         if($sender.FindForm().Name -eq 'CompletionPreview'){$sender.FindForm().Close();return}
@@ -132,30 +151,21 @@ function Show-CompletionCard($Instance,$Event=$null) {
         $owner=$sender.FindForm();$id=[string]$owner.Tag;$threadId=$owner.ThreadId;$target=@($config.instances|Where-Object {$_.id -eq $id})
         if($target.Count -ne 1){return};$owner.Close();Invoke-PanelAction {Open-CompletionTarget $target[0] $threadId}
     }
-    $button=New-UiButton $card $(if($preview){'关闭预览'}elseif(Test-TaskIdentifier $card.ThreadId){'查看任务'}else{'打开对应端'}) 18 138 $(if($preview){384}else{120}) $openAction;$button.Primary=$true
-    $heading.Cursor='Hand';$description.Cursor='Hand';$heading.Add_Click($openAction);$description.Add_Click($openAction)
-    if(-not $preview){
-        [void](New-UiButton $card '关闭提示' 148 138 112 {param($sender,$e) $sender.FindForm().Close()})
-        [void](New-UiButton $card '暂停提醒…' 270 138 132 {
-            param($sender,$e)
-            $pause=New-Object CodexDual.QuietMenu
-            foreach($minutes in @(15,60)){$item=$pause.Items.Add(('暂停 '+$minutes+' 分钟'));$item.Tag=$minutes;$item.Add_Click({param($sender,$e) Set-CompletionSnooze ([int]$sender.Tag)})}
-            if($sender.ContextMenuStrip){$sender.ContextMenuStrip.Dispose()};$sender.ContextMenuStrip=$pause
-            $owner=$sender.FindForm();$owner.PauseDismissal=$true
-            $pause.Add_Closed({param($menu,$args) if(-not $owner.IsDisposed){$owner.PauseDismissal=$false}}.GetNewClosure())
-            $pause.Show($sender,(New-Object Drawing.Point(0,$sender.Height)))
-        })
-    }
-    $dismiss=New-UiButton $card '×' 366 10 38 {param($sender,$e) $sender.FindForm().Close()};$dismiss.Quiet=$true;$dismiss.AccessibleName='关闭提示'
-    $header.Name='Muted';$description.Name='Muted'
-    Set-UiTheme $card
-    $header.ForeColor=[CodexDual.AppTheme]::Muted;$description.ForeColor=$header.ForeColor
+    $caption=(Get-InstanceDisplayName $Instance $script:preferences)+$(if($preview){' · 通知预览'}else{' · 任务完成'})
+    $card=New-CompactNoticeCard $caption $(if($preview){'预览'}else{'已完成'}) $title $openAction '打开任务'
+    $card.Tag=$cardTag;$card.ThreadId=[string](Get-ObjectValue $Event 'threadId' '')
+    $card.SetDisplaySettings(([int]$script:completionSettings.displaySeconds*1000),([bool]$script:completionSettings.fadeEnabled))
+    if($preview){$card.Name='CompletionPreview'}
+    $card.Add_FormClosed({param($sender,$e) [void]$script:completionCards.Remove($sender);Update-CompletionCardLayout})
     $script:completionCards.Add($card);Update-CompletionCardLayout;$card.Show()
 }
 function Show-CompletionPreview {
     $api=@($config.instances|Where-Object {$_.role -eq 'api'})
     if($api.Count -ne 1){Set-UiMessage '未找到 API 端，无法预览通知。';return}
-    Show-CompletionCard $api[0] ([pscustomobject]@{preview=$true;title='通知预览 · API 端任务已完成'})
+    Show-CompletionCard $api[0] ([pscustomobject]@{preview=$true;title='界面精简与前后台提问测试'})
+}
+function Get-ApiCompletionHistory {
+    return @($script:completionHistory|Where-Object {Get-ApiFeatureInstance $config ([string](Get-ObjectValue $_ 'instanceId' ''))})
 }
 function Set-CompletionNotificationsEnabled([bool]$Enabled) {
     $nextSettings=[pscustomobject]@{}
@@ -207,7 +217,7 @@ function Update-CompletionNotifications {
             Assert-NoReparsePoint $path
             if($file.Length -gt 4096){Remove-Item -LiteralPath $path -Force;continue}
             $event=Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json
-            $instance=@($config.instances|Where-Object {$_.id -eq $event.instanceId})
+            $instance=@(Get-ApiFeatureInstance $config $event.instanceId | Where-Object {$null -ne $_})
             if($event.schema -ne 1 -or $event.epoch -ne $script:completionSettings.epoch -or $instance.Count -ne 1 -or $event.eventId -notmatch '^[a-f0-9]{32}$' -or -not (Test-TaskIdentifier ([string](Get-ObjectValue $event 'threadId' ''))) -or -not (Test-TaskIdentifier ([string](Get-ObjectValue $event 'turnId' '')))){
                 Remove-Item -LiteralPath $path -Force;continue
             }

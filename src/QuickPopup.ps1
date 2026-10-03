@@ -11,6 +11,7 @@ function Initialize-QuickPopup {
     $dismiss=New-UiButton $script:quickPopup '×' 310 16 34 { $script:quickPopup.Hide() };$dismiss.Quiet=$true;$dismiss.AccessibleName='关闭快捷操作';$dismiss.Anchor='Top,Right'
     $script:quickBody=New-Object Windows.Forms.Panel;$script:quickBody.SetBounds(12,82,336,382);$script:quickBody.Anchor='Top,Bottom,Left,Right';$script:quickBody.AutoScroll=$true;$script:quickPopup.Controls.Add($script:quickBody)
     $foot=New-UiLabel $script:quickPopup '单击托盘打开 API · 双击打开面板' 24 478 312 22;$foot.Name='Muted';$foot.ForeColor=[CodexDual.AppTheme]::Muted;$foot.Font=New-Object Drawing.Font($panel.Font.FontFamily,8);$foot.Anchor='Bottom,Left,Right'
+    $script:quickFooter=$foot
     $script:quickNavigation=New-Object 'Collections.Generic.List[string]';$script:quickNotificationStamp='';$script:quickRecentPage=0;$script:quickPopupPage='home';$script:quickPopupRows=@{};$script:quickPopupRole='api'
 }
 function Add-QuickPopupRow([string]$Text,[string]$Detail,[hashtable]$Action,[int]$Y,[bool]$Enabled=$true,[string]$Icon='arrow') {
@@ -53,13 +54,9 @@ function Set-QuickPopupPage([ValidateSet('home','notifications','recent','direct
                 $enabled=$script:completionReady -and $script:completionSettings.enabled
                 $script:quickSubtitle.Text=if($script:completionReady){Get-CompletionStatusText}else{'通知暂不可用'}
                 $script:quickNotificationStamp=$script:quickSubtitle.Text+'|'+$enabled
-                [void](Add-QuickPopupRow $(if($enabled){'完成提醒：已开启'}else{'完成提醒：已关闭'}) $(if($enabled){'点击关闭完成提醒'}else{'点击开启完成提醒'}) @{action='notification-toggle'} 0 $script:completionReady 'bell')
-                [void](Add-QuickPopupRow '暂停提醒 15 分钟' '' @{action='snooze';minutes=15} 72 $enabled 'clock')
-                [void](Add-QuickPopupRow '暂停提醒 1 小时' '' @{action='snooze';minutes=60} 120 $enabled 'clock')
-                [void](Add-QuickPopupRow '恢复提醒' '' @{action='snooze';minutes=0} 168 ($enabled -and (Test-CompletionSnoozed)) 'bell')
-                [void](Add-QuickPopupRow '预览通知' '' @{action='notification-preview'} 220 $script:completionReady 'panel')
-                [void](Add-QuickPopupRow '关闭所有提示' '' @{action='dismiss'} 268 $script:completionReady 'close')
-                [void](Add-QuickPopupRow '最近完成' '' @{action='page';page='recent'} 324 $true 'clock')
+                [void](Add-QuickPopupRow '通知设置' '' @{action='notification-settings'} 0 $true 'settings')
+                [void](Add-QuickPopupRow '待处理问题' '' @{action='pending-questions'} 52 $true 'bell')
+                [void](Add-QuickPopupRow '最近完成' '' @{action='page';page='recent'} 104 $true 'clock')
             }
             'appearance' {
                 $script:quickSubtitle.Text='即时生效，自动保存'
@@ -73,7 +70,7 @@ function Set-QuickPopupPage([ValidateSet('home','notifications','recent','direct
                 }
             }
             'recent' {
-                $entries=@($script:completionHistory|Where-Object {$record=$_;@($config.instances|Where-Object {$_.id -eq $record.instanceId}).Count -eq 1})
+                $entries=@(Get-ApiCompletionHistory)
                 $pages=[Math]::Max(1,[int][Math]::Ceiling($entries.Count/4.0));$script:quickRecentPage=[Math]::Max(0,[Math]::Min($script:quickRecentPage,$pages-1))
                 $script:quickSubtitle.Text=if($entries.Count){'本次运行 · 共 '+$entries.Count+' 条'}else{'本次运行'}
                 $y=0
@@ -112,6 +109,12 @@ function Set-QuickPopupPage([ValidateSet('home','notifications','recent','direct
             }
         }
     }finally{$script:quickBody.ResumeLayout($true)}
+    $oldBottom=$script:quickPopup.Bottom
+    $script:quickPopup.Height=if($Page -eq 'notifications'){260}else{510}
+    $script:quickPopup.PreferredPopupSize=New-Object Drawing.Size(360,$script:quickPopup.Height)
+    $script:quickFooter.Visible=$Page -ne 'notifications'
+    $script:quickBody.Height=if($Page -eq 'notifications'){164}else{382}
+    if($script:quickPopup.Visible){$area=[Windows.Forms.Screen]::FromControl($script:quickPopup).WorkingArea;$script:quickPopup.Top=[Math]::Max($area.Top,[Math]::Min($oldBottom-$script:quickPopup.Height,$area.Bottom-$script:quickPopup.Height))}
     Set-UiTheme $script:quickPopup
     # Keep keyboard focus inside the new page after disposing the previously focused row.
     $first=@($script:quickBody.Controls|Where-Object {$_.Enabled -and $_ -is [Windows.Forms.Button]})|Select-Object -First 1
@@ -138,13 +141,7 @@ function Go-QuickPopupBack {
     Set-QuickPopupPage $page -Refresh
 }
 function Invoke-QuickPopupCommand($Command) {
-    if($Command.action -in @('notification-toggle','notification-preview','snooze','dismiss','clear')){
-        $request=@{action=$Command.action}
-        if($Command.action -eq 'notification-toggle'){$request=@{action='toggle';enabled=(-not $script:completionSettings.enabled)}}
-        elseif($Command.action -eq 'notification-preview'){$request=@{action='preview'}}
-        elseif($Command.action -eq 'snooze'){$request=@{action='snooze';minutes=$Command.minutes}}
-        Invoke-NotificationUiAction $request;return
-    }
+    if($Command.action -eq 'clear'){Invoke-NotificationUiAction @{action='clear'};return}
     if($Command.action -in @('appearance-mode','appearance-accent')){
         try{if($Command.action -eq 'appearance-mode'){Set-ControllerAppearance -Mode $Command.value}else{Set-ControllerAppearance -Accent $Command.value};Set-QuickPopupPage 'appearance' -Refresh}catch{Show-Error $_};return
     }
@@ -161,14 +158,14 @@ function Invoke-QuickPopupCommand($Command) {
         switch($Command.action){
             'open' {Invoke-PanelAction {Open-PanelInstance $instance}}
             'panel' {Show-ControlPanel}
+            'notification-settings' {Show-ControlPanel;Show-WorkspacePage 'notifications'}
+            'pending-questions' {$script:notificationListMode='pending';Show-ControlPanel;Show-WorkspacePage 'notifications'}
             'both' {Invoke-PanelAction {Open-BothPanelInstances}}
             'configure' {Show-ControlPanel;Show-ApiManager}
             'settings' {Show-ControlPanel;Show-WorkspacePage 'settings'}
             'diagnostics' {Show-ControlPanel;Show-ControllerDiagnostics}
             'directory' {Invoke-PanelAction {Open-InstanceDirectory $instance $Command.kind}}
             'task' {Invoke-PanelAction {Open-CompletionTarget $instance $Command.threadId}}
-            'snooze' {Set-CompletionSnooze ([int]$Command.minutes)}
-            'dismiss' {Close-CompletionCards}
             'clear' {$script:completionHistory=@()}
             'close' {Show-ControlPanel;Invoke-PanelAction {Close-Instance $instance}}
             'quit' {$script:quittingController=$true;$context.ExitThread()}

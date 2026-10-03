@@ -8,6 +8,13 @@ function Get-ObjectValue($Object, [string]$Name, $Default = $null) {
     if($Object -is [System.Collections.IDictionary] -and $Object.Contains($Name)){return $Object[$Name]}
     if ($null -ne $Object -and $null -ne $Object.PSObject.Properties[$Name]) { return $Object.$Name }; return $Default
 }
+function Get-ApiFeatureInstance($Config,[string]$InstanceId) {
+    # Automatic project features must fail closed; manual dual-instance controls are separate.
+    $api=@($Config.instances|Where-Object {(Get-ObjectValue $_ 'role' '') -eq 'api'})
+    $matches=@($Config.instances|Where-Object {(Get-ObjectValue $_ 'id' '') -eq $InstanceId})
+    if($api.Count -eq 1 -and $matches.Count -eq 1 -and $InstanceId -match '^[a-f0-9]{32}$' -and $api[0].id -eq $InstanceId){return $api[0]}
+    return $null
+}
 . "$PSScriptRoot\Preferences.ps1"
 . "$PSScriptRoot\ApiManagement.ps1"
 function Test-SamePath([string]$A,[string]$B) {

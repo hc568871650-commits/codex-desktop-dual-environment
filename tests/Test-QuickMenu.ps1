@@ -22,6 +22,8 @@ $exitItem=New-Object Windows.Forms.ToolStripMenuItem('退出控制器')
 function Invoke-PanelAction([scriptblock]$Action){& $Action}
 function Open-CompletionTarget($Instance,$ThreadId){$script:taskCalls+=@{role=$Instance.role;threadId=$ThreadId}}
 function Open-InstanceDirectory($Instance,$Kind){$script:directoryCalls+=@{role=$Instance.role;kind=$Kind}}
+function Show-ControlPanel {$script:settingsOpened=$true}
+function Show-WorkspacePage($Page){$script:settingsPageOpened=$Page}
 try{
  Initialize-QuickMenu
  Check ($menu -is [CodexDual.QuietMenu] -and $menu.Renderer -is [CodexDual.QuietMenuRenderer]) 'Tray uses the shared neutral renderer'
@@ -30,14 +32,15 @@ try{
  Check ($script:recentMenu.DropDownItems.Count -eq 1 -and -not $script:recentMenu.DropDownItems[0].Enabled) 'Empty recent history has a disabled placeholder'
  $script:recentMenu.HideDropDown()
  $thread=[guid]::NewGuid().ToString();$script:completionHistory=@([pscustomobject]@{instanceId=('b'*32);threadId=$thread;title='菜单测试'})
+ $script:completionHistory+=@([pscustomobject]@{instanceId=('a'*32);threadId=[guid]::NewGuid().ToString();title='官方记录不得展示'})
  $script:recentMenu.ShowDropDown();[Windows.Forms.Application]::DoEvents()
  Check ($script:recentMenu.DropDownItems.Count -eq 3) 'Recent submenu refreshes after setup function returns'
  $script:recentMenu.DropDownItems[0].PerformClick()
  Check ($script:taskCalls.Count -eq 1 -and $script:taskCalls[0].role -eq 'api' -and $script:taskCalls[0].threadId -eq $thread) 'Recent item targets exact environment and task'
  $script:directoryParents.api.DropDownItems[1].PerformClick()
  Check ($script:directoryCalls[0].role -eq 'api' -and $script:directoryCalls[0].kind -eq 'projectless') 'Directory submenu retains environment and directory kind'
- $menu.Show(50,50);$script:notificationsMenu.ShowDropDown();[Windows.Forms.Application]::DoEvents()
- Check ($completionMenu.Checked -and -not $script:notificationsMenu.DropDownItems[3].Enabled) 'Notification submenu reflects enabled and non-snoozed state'
- $script:notificationsMenu.HideDropDown();$menu.Close()
+ $script:notificationsMenu.PerformClick()
+ Check (-not $script:notificationsMenu.HasDropDownItems -and $script:settingsOpened -and $script:settingsPageOpened -eq 'notifications') 'Tray notification entry leads only to console settings'
+ $menu.Close()
 }finally{$menu.Dispose()}
 Write-Output "PASSED: $script:passed quick-menu checks"

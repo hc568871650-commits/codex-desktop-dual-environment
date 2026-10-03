@@ -104,26 +104,30 @@ try{
     while([DateTime]::UtcNow -lt $deadline){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 10}
     try{Check (-not $rescue.IsDisposed -and $rescue.Opacity -eq 1) 'Switching to permanent mode cancels a pending dismissal'}finally{$rescue.Dispose()}
     Show-CompletionCard $config.instances[0]
-    $official=$script:completionCards[0];$area=$script:completionArea
-    Check ($official.Bottom -eq $area.Bottom-20) 'Official alone starts at bottom without an empty API slot'
+    Check ($script:completionCards.Count -eq 0) 'Direct official completion cannot create a card'
+    Open-CompletionTarget $config.instances[0] ([guid]::NewGuid().ToString())
+    Check ($script:opened.Count -eq 0 -and $script:taskLinks.Count -eq 0) 'Direct official notification navigation is rejected'
+    Show-CompletionPreview
+    $preview=$script:completionCards[0];$area=$script:completionArea
+    Check ($preview.Bottom -eq $area.Bottom-20) 'API preview alone starts at bottom without an empty slot'
     Show-CompletionCard $config.instances[1]
-    $api=$script:completionCards[1]
-    Check ($api.Bottom -eq $area.Bottom-20 -and $official.Bottom -eq $api.Top-12) 'New card takes bottom and existing card stacks immediately above'
-    $api.Close()
-    Check ($official.Bottom -eq $area.Bottom-20) 'Closing bottom card removes the empty slot'
-    Show-CompletionCard $config.instances[0]
-    Check ($script:completionCards.Count -eq 1 -and $official.IsDisposed) 'Repeated completion replaces only the same environment card'
+    $api=$script:completionCards[0]
+    Check ($api.Bottom -eq $area.Bottom-20 -and $preview.IsDisposed -and $script:completionCards.Count -eq 1) 'New notice replaces the prior card without stacking'
+    $api.Controls['DismissNotice'].PerformClick()
+    Check ($script:completionCards.Count -eq 0 -and $script:opened.Count -eq 0) 'Close icon dismisses the card without opening the task'
+    Show-CompletionPreview
+    Check ($script:completionCards.Count -eq 1 -and $preview.IsDisposed) 'Repeated preview replaces only the preview card'
     Show-CompletionCard $config.instances[1]
-    $api=$script:completionCards[1]
+    $api=$script:completionCards[0]
     $script:openBusy=$true
-    @($api.Controls|Where-Object {$_.Text -eq '打开对应端'})[0].PerformClick()
+    $api.Controls['NoticeBody'].PerformClick()
     Check (-not $api.IsDisposed -and $script:opened.Count -eq 0) 'Pending open preserves completion card for a later click'
     $script:openBusy=$false
-    @($api.Controls|Where-Object {$_.Text -eq '打开对应端'})[0].PerformClick()
+    $api.Controls['NoticeBody'].PerformClick()
     Check ($script:opened.Count -eq 1 -and $script:opened[0] -eq $config.instances[1].id) 'API card button routes only to API instance'
-    $official=$script:completionCards[0]
-    @($official.Controls|Where-Object {$_.Text -eq '打开对应端'})[0].PerformClick()
-    Check ($script:opened.Count -eq 2 -and $script:opened[1] -eq $config.instances[0].id) 'Official card button routes only to official instance'
+    Show-CompletionPreview;$preview=$script:completionCards[0]
+    $preview.Controls['NoticeBody'].PerformClick()
+    Check ($script:opened.Count -eq 1) 'Preview closes without navigating any instance'
     Check ($script:completionCards.Count -eq 0) 'Open actions close their consumed cards'
     Save-CompletionSettings $config $script:completionSettings
     $inbox=Join-Path $script:completionRoot 'inbox';[void][IO.Directory]::CreateDirectory($inbox)
@@ -131,12 +135,19 @@ try{
     Write-AtomicText (Join-Path $inbox 'valid.local.json') ($event|ConvertTo-Json)
     $event.epoch=[Guid]::NewGuid().ToString('N');Write-AtomicText (Join-Path $inbox 'stale.local.json') ($event|ConvertTo-Json)
     $event.epoch=$script:completionSettings.epoch;$event.instanceId='c'*32;Write-AtomicText (Join-Path $inbox 'unknown.local.json') ($event|ConvertTo-Json)
+    $event.instanceId=$config.instances[0].id;$event.eventId=[Guid]::NewGuid().ToString('N');Write-AtomicText (Join-Path $inbox 'official.local.json') ($event|ConvertTo-Json)
     $SmokeTest=$false;Update-CompletionNotifications;$SmokeTest=$true
-    Check ($script:completionCards.Count -eq 1 -and $script:completionCards[0].Tag -eq $config.instances[1].id) 'Queue admits only matching epoch and configured instance'
+    Check ($script:completionCards.Count -eq 1 -and $script:completionCards[0].Tag -eq $config.instances[1].id) 'Queue admits only matching epoch and configured API instance'
+    Check ($script:completionHistory.Count -eq 1 -and $script:completionHistory[0].instanceId -eq $config.instances[1].id) 'Same-epoch official event never enters notification history'
     Check (@(Get-ChildItem -LiteralPath $inbox).Count -eq 0) 'Consumed and rejected queue entries cannot replay'
     $savedThread=$script:completionCards[0].ThreadId
-    @($script:completionCards[0].Controls|Where-Object {$_.Text -eq '查看任务'})[0].PerformClick()
+    $script:completionCards[0].Controls['NoticeBody'].PerformClick()
     Check ($script:taskLinks.Count -eq 1 -and $script:taskLinks[0].roles[0] -eq 'api' -and $script:taskLinks[0].threadId -eq $savedThread) 'Task click preserves instance role and exact thread ID'
+    $apiHistory=@($script:completionHistory)
+    $script:completionHistory=@([pscustomobject]@{instanceId=$config.instances[0].id;threadId=[guid]::NewGuid().ToString();title='official must be hidden'})+@($apiHistory)
+    $filteredHistory=@(Get-ApiCompletionHistory)
+    Check ($filteredHistory.Count -eq 1 -and $filteredHistory[0].instanceId -eq $config.instances[1].id) 'History filtering rejects legacy official records'
+    $script:completionHistory=$apiHistory
     Set-CompletionSnooze 15
     Check ((Test-CompletionSnoozed) -and (Read-CompletionSettings $config).snoozedUntilUtc) 'Snooze persists its expiry'
     $event.instanceId=$config.instances[1].id;$event.eventId=[Guid]::NewGuid().ToString('N');$event.threadId=[Guid]::NewGuid().ToString()
@@ -149,6 +160,7 @@ try{
     Show-CompletionCard $config.instances[1] $event
     [Windows.Forms.Application]::DoEvents()
     Save-UiScreenshot $script:completionCards[0] (Join-Path $root 'notification.png')
+    Check ($script:completionCards[0].Controls.Count -eq 3 -and $script:completionCards[0].Height -ge 100 -and $script:completionCards[0].Height -le 184) 'Compact notice fits content with only status, click surface and close icon'
     Check ($script:completionCards[0].FormBorderStyle -eq 'None' -and $script:completionCards[0].AutoDismissMilliseconds -eq 15000) 'Notification has integrated chrome and bounded auto-dismiss'
     Close-CompletionCards
     $event.threadId='../../not-a-task';$event.eventId=[Guid]::NewGuid().ToString('N')
@@ -188,5 +200,26 @@ try{
     $deadline=[DateTime]::UtcNow.AddSeconds(2)
     while(-not $paused.IsDisposed -and [DateTime]::UtcNow -lt $deadline){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 10}
     try{Check $paused.IsDisposed 'Resumed countdown eventually dismisses card'}finally{if(-not $paused.IsDisposed){$paused.Dispose()}}
+    # Simulate the attention boundary after the native identity checks in
+    # Test-FastRestore; exercise actual queue consumption and UI creation here.
+    function Test-CompletionForeground($Instance){return $script:foregroundApi}
+    $script:foregroundApi=$true
+    $script:completionHistory=@();Close-CompletionCards
+    $event.threadId=[Guid]::NewGuid().ToString();$event.eventId=[Guid]::NewGuid().ToString('N')
+    $event.epoch=$script:completionSettings.epoch
+    Write-AtomicText (Join-Path $inbox 'foreground.local.json') ($event|ConvertTo-Json)
+    $SmokeTest=$false;Update-CompletionNotifications;$SmokeTest=$true
+    Check ($script:completionCards.Count -eq 0) 'Foreground API completion creates no popup'
+    Check ($script:completionHistory.Count -eq 1) 'Suppressed completion remains in recent history'
+    Check (-not (Test-Path (Join-Path $inbox 'foreground.local.json'))) 'Foreground completion is consumed rather than deferred'
+    Show-CompletionPreview
+    Check ($script:completionCards.Count -eq 1 -and $script:completionCards[0].Name -eq 'CompletionPreview') 'Explicit preview remains available in foreground'
+    Close-CompletionCards;$script:foregroundApi=$false
+    $SmokeTest=$false;Update-CompletionNotifications;$SmokeTest=$true
+    Check ($script:completionCards.Count -eq 0) 'Switching away does not replay suppressed events'
+    $event.eventId=[Guid]::NewGuid().ToString('N')
+    Write-AtomicText (Join-Path $inbox 'background.local.json') ($event|ConvertTo-Json)
+    $SmokeTest=$false;Update-CompletionNotifications;$SmokeTest=$true
+    Check ($script:completionCards.Count -eq 1) 'New background completion still shows its popup'
 }finally{Dispose-CompletionNotifications;$panel.Dispose()}
 Write-Output "PASSED: $script:passed notification UI checks. Output: $root"

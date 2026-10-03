@@ -2,7 +2,7 @@
 
 function Get-ControllerPreferencesPath($Config) { return Join-Path $Config.stateDirectory 'preferences.local.json' }
 function Read-ControllerPreferences($Config) {
-    $value=@{schema=1;names=@{};panel=$null;ccsExecutable='';ccsSettingsPath='';pendingApi=$null;appearance=@{mode='dark';accent='neutral'}}
+    $value=@{schema=1;names=@{};panel=$null;ccsExecutable='';ccsSettingsPath='';pendingApi=$null;appearance=@{mode='dark';accent='neutral'};windowBehavior=(Get-WindowBehavior $null)}
     $path=Get-ControllerPreferencesPath $Config
     Assert-NoReparsePoint $path
     if(Test-Path -LiteralPath $path){
@@ -13,10 +13,27 @@ function Read-ControllerPreferences($Config) {
         $mode=Get-ObjectValue $appearance 'mode' 'dark';$accent=Get-ObjectValue $appearance 'accent' 'neutral'
         if($mode -in @('dark','light','system')){$value.appearance.mode=$mode}
         if($accent -in @('neutral','blue','green','purple')){$value.appearance.accent=$accent}
+        $value.windowBehavior=Get-WindowBehavior $saved
         $names=Get-ObjectValue $saved 'names' $null
         if($names){foreach($property in $names.PSObject.Properties){$value.names[$property.Name]=[string]$property.Value}}
     }
     return $value
+}
+function Get-WindowBehavior($Preferences) {
+    $saved=Get-ObjectValue $Preferences 'windowBehavior' $null
+    $result=@{panelMode='focus';panelOverlay=$false;questionMode='notice';questionOverlay=$true}
+    $panelMode=Get-ObjectValue $saved 'panelMode' 'focus';$questionMode=Get-ObjectValue $saved 'questionMode' 'notice'
+    if($panelMode -in @('focus','passive')){$result.panelMode=$panelMode}
+    if($questionMode -in @('notice','passive','focus')){$result.questionMode=$questionMode}
+    foreach($key in @('panelOverlay','questionOverlay')){$flag=Get-ObjectValue $saved $key $result[$key];if($flag -is [bool]){$result[$key]=$flag}}
+    return $result
+}
+function Set-WindowBehavior($Config,[string]$PanelMode,[bool]$PanelOverlay,[string]$QuestionMode,[bool]$QuestionOverlay) {
+    if($PanelMode -notin @('focus','passive') -or $QuestionMode -notin @('notice','passive','focus')){throw '窗口行为设置无效。'}
+    $saved=Read-ControllerPreferences $Config
+    $saved.windowBehavior=@{panelMode=$PanelMode;panelOverlay=$PanelOverlay;questionMode=$QuestionMode;questionOverlay=$QuestionOverlay}
+    Save-ControllerPreferences $Config $saved
+    return $saved
 }
 function Save-ControllerPreferences($Config,$Preferences) {
     $path=Get-ControllerPreferencesPath $Config;Assert-NoReparsePoint $path

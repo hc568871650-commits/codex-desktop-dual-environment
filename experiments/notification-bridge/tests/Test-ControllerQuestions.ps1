@@ -40,6 +40,13 @@ try{
     PumpUntil {$script:questionPending.Count -eq 1} 'question arrival'
     Check ($script:notificationListMode -eq 'pending' -and $script:pendingTab.Text -like '*1*') 'Question appears in the controller pending tab'
     Check ($script:questionNotice -and $script:questionNotice.Visible) 'New question opens a non-activating notice'
+    Save-UiScreenshot $script:questionNotice (Join-Path $output 'question-notice.png')
+    $script:questionNotice.Controls['NoticeBody'].PerformClick()
+    Check ($script:questionWindow.Visible -and $script:questionPending.Count -eq 1 -and $script:questionNotice.IsDisposed) 'Clicking question card opens its answer window without submitting'
+    $script:questionWindow.Close();Show-QuestionNotice $script:questionPending[0]
+    $script:questionNotice.Controls['DismissNotice'].PerformClick()
+    Check ($script:questionPending.Count -eq 1 -and -not $script:questionWindow.Visible) 'Question card close icon only dismisses the notice'
+    Show-QuestionNotice $script:questionPending[0]
     Set-CompletionDisplaySettings 1 $false
     $notice=$script:questionNotice;$notice.Location=New-Object Drawing.Point(-10000,-10000);$panel.Activate()
     PumpUntil {$notice.IsDisposed} 'notice expires'
@@ -53,6 +60,12 @@ try{
     Show-PendingQuestion $token
     $window.Controls.Find('Option_choice_1',$true)[0].Checked=$true
     $window.Controls.Find('Answer_detail',$true)[0].Text='控制器回传测试'
+    Check $window.TopMost 'Answer window stays above ordinary Codex windows'
+    Clear-PendingQuestionState '模拟瞬时断线'
+    Check ($window.Visible -and -not $window.IsRequestValid -and -not $window.Controls.Find('SubmitAnswer',$true)[0].Enabled) 'Connection loss retains the window and disables submission immediately'
+    $script:questionPollAt=[DateTime]::MinValue
+    PumpUntil {$window.IsRequestValid} 'same token recovery'
+    Check ($window.Controls.Find('Option_choice_1',$true)[0].Checked -and $window.Controls.Find('Answer_detail',$true)[0].Text -ceq '控制器回传测试' -and $window.Controls.Find('SubmitAnswer',$true)[0].Enabled) 'Verified same-token snapshot restores answer controls and draft without reopening'
     Show-QuestionPreview
     $script:questionPreview.Controls.Find('Option_display_0',$true)[0].Checked=$true
     $script:questionPreview.Controls.Find('Answer_note',$true)[0].Text='希望收起提示后仍保留待处理问题。'
@@ -66,24 +79,51 @@ try{
     Save-UiScreenshot $window (Join-Path $output 'question-light.png');Save-UiScreenshot $script:notificationsPage (Join-Path $output 'pending-light.png')
     Check ($window.BackColor -eq [CodexDual.AppTheme]::Background) 'Open question window follows controller appearance'
     PumpUntil {-not $script:questionClient.Busy} 'poll completes'
+    # Feed an incomplete aggregate through the real controller update path.
+    # Another healthy endpoint must not prove this question was answered.
+    $realClient=$script:questionClient;$pendingBefore=@($script:questionPending)
+    Show-QuestionNotice $script:questionPending[0]
+    $uncertainNotice=$script:questionNotice
+    try{
+        $script:questionClient=[pscustomobject]@{Busy=$true;Reply=[pscustomobject]@{Kind='snapshot';Token='';Error=$null;Json='{"ok":true,"pending":[],"unavailableConnections":0,"confirmedConnections":["other-connection"]}'}}
+        $script:questionClient|Add-Member ScriptMethod Take {$value=$this.Reply;$this.Reply=$null;return $value}
+        Update-PendingQuestions
+        Check ($window.Visible -and $uncertainNotice.Visible -and -not $window.IsRequestValid -and $window.Controls.Find('Answer_detail',$true)[0].Text -ceq '控制器回传测试') 'Missing unconfirmed connection retains both surfaces and the exact draft'
+        $script:questionClient.Reply=[pscustomobject]@{Kind='answer';Token=('f'*32);Error=$null;Json='{"ok":true}'}
+        Update-PendingQuestions
+        Check ($window.Visible -and $uncertainNotice.Visible) 'Late answer for a different token cannot close the current question or notice'
+    }finally{$script:questionClient=$realClient;$script:questionPending=$pendingBefore}
+    $script:questionPollAt=[DateTime]::MinValue
+    PumpUntil {$window.IsRequestValid -and -not $script:questionClient.Busy} 'confirmed question restores after missing endpoint'
+    Show-QuestionNotice $script:questionPending[0]
+    $answerNotice=$script:questionNotice
     $window.Controls.Find('SubmitAnswer',$true)[0].PerformClick()
     PumpUntil {$script:questionPending.Count -eq 0} 'answer result'
+    Check (-not $window.Visible -and $answerNotice.IsDisposed) 'Successful answer closes its window and notice in the same result update without an expiry delay'
     $events=@((ReadNative),(ReadNative));$received=@($events|Where-Object {$_.method -eq 'mock/received'})[0]
     if(-not $received.params.message.PSObject.Properties['result']){throw ('Unexpected fixture response: '+($received|ConvertTo-Json -Depth 8 -Compress))}
     Check ($received.params.message.result.answers.choice.answers[0] -eq 'B' -and $received.params.message.result.answers.detail.answers[0] -ceq '控制器回传测试') 'Formal UI answer reaches the proxy with exact selection and Unicode'
     Check (-not $window.Controls.Find('SubmitAnswer',$true)[0].Enabled) 'Answered question cannot be submitted again'
+    $script:preferences['windowBehavior']=@{panelMode='focus';panelOverlay=$false;questionMode='passive';questionOverlay=$true}
+    $panel.Activate();[Windows.Forms.Application]::DoEvents();$foregroundBefore=[CodexDual.Native]::Foreground()
     $process.StandardInput.WriteLine('{"method":"mock/reuse"}');[void](ReadNative)
     PumpUntil {$script:questionPending.Count -eq 1} 'next question'
     $next=$script:questionPending[0].requestToken;Check ($next -ne $token) 'Reused request ID becomes a distinct pending question'
+    Check ($window.Visible -and $window.RequestToken -ceq $next -and [CodexDual.Native]::Foreground() -eq $foregroundBefore) 'Automatic passive mode opens the new question without moving foreground focus'
     $returnThread=[guid]::NewGuid().ToString();$script:questionPending[0].threadId=$returnThread
     $script:returnTarget=$null
     function Open-CompletionTarget($Instance,[string]$ThreadId){$script:returnTarget=@{id=$Instance.id;thread=$ThreadId}}
     Show-PendingQuestion $next
     $window.Controls.Find('ReturnToCodex',$true)[0].PerformClick()
     Check (-not $window.Visible -and $script:returnTarget.id -eq $api.id -and $script:returnTarget.thread -eq $returnThread) 'Return action hides the compact question and targets only its API task'
+    Show-PendingQuestion $next
     $process.StandardInput.WriteLine('{"method":"mock/resolve"}');[void](ReadNative)
     PumpUntil {$script:questionPending.Count -eq 0} 'native resolve'
-    Check (-not $window.Controls.Find('SubmitAnswer',$true)[0].Enabled) 'Native resolution disables the formal answer window'
+    Check (-not $window.Visible -and -not $window.Controls.Find('SubmitAnswer',$true)[0].Enabled) 'Native resolution closes the visible answer window at the next verified snapshot'
+    $script:preferences.windowBehavior.questionMode='focus'
+    $process.StandardInput.WriteLine('{"method":"mock/reuse"}');[void](ReadNative)
+    PumpUntil {$script:questionPending.Count -eq 1 -and $window.Visible} 'automatic focused question'
+    Check ([CodexDual.Native]::Foreground() -eq $window.Handle -and $window.AnswerJson -eq $null) 'Automatic focus mode foregrounds the question without generating an answer'
     & "$trial\Rollback-ApiBridge.ps1"|Out-Null
     PumpUntil {$script:questionStatus -like '*已停用*'} 'rollback status'
     Check ($script:questionPending.Count -eq 0) 'Rollback clears pending UI without sending answers'

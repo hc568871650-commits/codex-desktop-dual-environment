@@ -87,10 +87,39 @@ namespace CodexDual {
   protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e){using(var p=new Pen(AppTheme.Text,1.6f)){var r=e.ImageRectangle;e.Graphics.DrawLines(p,new[]{new Point(r.Left+3,r.Top+r.Height/2),new Point(r.Left+6,r.Bottom-4),new Point(r.Right-2,r.Top+3)});}}
  }
  public class ShellForm:Form {
+  [DllImport("user32.dll")]static extern bool SetWindowPos(IntPtr h,IntPtr after,int x,int y,int cx,int cy,uint flags);
+  [DllImport("user32.dll")]static extern bool ShowWindow(IntPtr h,int command);
+  [DllImport("user32.dll")]static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")]static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")]static extern bool ReleaseCapture();
   [DllImport("user32.dll")]static extern IntPtr SendMessage(IntPtr h,int msg,IntPtr w,IntPtr l);
   [DllImport("dwmapi.dll")]static extern int DwmSetWindowAttribute(IntPtr h,int attribute,ref int value,int size);
   bool titleAdded;public bool AppWindow{get;set;}
+  public bool ShowWithoutFocus{get;set;}
+  protected override bool ShowWithoutActivation{get{return ShowWithoutFocus;}}
+  void PreserveForeground(IntPtr previous){
+   if(previous!=IntPtr.Zero&&IsHandleCreated&&previous!=Handle&&GetForegroundWindow()==Handle)SetForegroundWindow(previous);
+  }
+  protected override void SetVisibleCore(bool value){
+   IntPtr previous=GetForegroundWindow();
+   base.SetVisibleCore(value);
+   if(value&&ShowWithoutFocus)PreserveForeground(previous);
+  }
+  // Showing above another window and owning keyboard focus are independent choices.
+  // Do not use WS_EX_NOACTIVATE: a user click must still allow ordinary typing.
+  public void Present(bool takeFocus,bool overlay){
+   IntPtr previous=GetForegroundWindow();
+   ShowWithoutFocus=!takeFocus;
+   TopMost=overlay;
+   if(!Visible)Show();
+   if(WindowState==FormWindowState.Minimized){
+    if(takeFocus)WindowState=FormWindowState.Normal;
+    else ShowWindow(Handle,4); // SW_SHOWNOACTIVATE also restores without activation.
+   }
+   SetWindowPos(Handle,overlay?new IntPtr(-1):new IntPtr(-2),0,0,0,0,0x0010|0x0001|0x0002|0x0040);
+   if(takeFocus)Activate();
+   else PreserveForeground(previous);
+  }
   public ShellForm(){DoubleBuffered=true;BackColor=AppTheme.Background;ForeColor=AppTheme.Text;AutoScaleMode=AutoScaleMode.Dpi;}
   protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);UpdateWindowTheme();}
   public void UpdateWindowTheme(){if(!IsHandleCreated)return;try{int dark=AppTheme.IsDark?1:0,round=2;DwmSetWindowAttribute(Handle,20,ref dark,4);DwmSetWindowAttribute(Handle,33,ref round,4);}catch(DllNotFoundException){}catch(EntryPointNotFoundException){}}

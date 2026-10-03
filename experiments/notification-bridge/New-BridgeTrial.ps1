@@ -1,7 +1,8 @@
 ﻿param(
     [Parameter(Mandatory=$true)][string]$Destination,
     [Parameter(Mandatory=$true)][string]$RealCli,
-    [Parameter(Mandatory=$true)][string]$DesktopExecutable
+    [Parameter(Mandatory=$true)][string]$DesktopExecutable,
+    [switch]$TakeoverQuestions
 )
 . "$PSScriptRoot\Trial.Common.ps1"
 if($PSVersionTable.PSEdition -ne 'Desktop'){throw 'Build with Windows PowerShell 5.1.'}
@@ -23,6 +24,7 @@ foreach($file in @('Trial.Common.ps1','Start-BridgeTrial.ps1','Rollback-ApiBridg
 & "$PSScriptRoot\Build-Bridge.ps1" -Destination (Join-Path $root 'BridgeProxy.exe')
 & "$PSScriptRoot\Build-QuestionClient.ps1" -Destination (Join-Path $root 'QuestionClient.exe')
 $config=@{realCli=$cli;apiHome=(Join-Path $root 'CodexHome');pipeName=('codex-api-question-trial-'+$id);instanceId=('api-trial-'+$id)}
+if($TakeoverQuestions){$config.takeoverQuestions=$true;$config.multiConnection=$true}
 Write-TrialJson (Join-Path $root 'bridge.config.json') $config
 $manifest=@{schema=1;kind='isolated-api-bridge-trial';id=$id;root=$root;apiHome=$config.apiHome;profile=(Join-Path $root 'DesktopProfile');projects=(Join-Path $root 'Projects');realCli=$cli;realCliHash=(Get-FileHash -LiteralPath $cli).Hash;desktopExe=$desktop;desktopHash=(Get-FileHash -LiteralPath $desktop).Hash;proxyHash=(Get-FileHash -LiteralPath (Join-Path $root 'BridgeProxy.exe')).Hash;createdUtc=[DateTime]::UtcNow.ToString('o');originalInstallationModified=$false}
 Write-TrialJson (Join-Path $root 'trial.json') $manifest

@@ -16,10 +16,10 @@ jobs:
         shell: powershell
         run: ./tests/Test-All.ps1
       - name: Test isolated question bridge with fixtures
-        timeout-minutes: 4
+        timeout-minutes: 8
         shell: powershell
         run: |
-          foreach ($test in @('Test-BridgeTransport','Test-TrialRecovery','Test-QuestionClient','Test-ControllerQuestions')) {
+          foreach ($test in @('Test-BridgeTransport','Test-TrialRecovery','Test-QuestionClient','Test-ControllerQuestions','Test-Takeover','Test-ControllerTakeover','Test-MultiConnection')) {
             & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "./experiments/notification-bridge/tests/$test.ps1"
             if ($LASTEXITCODE -ne 0) { throw "$test failed with exit code $LASTEXITCODE" }
           }
@@ -33,7 +33,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: validation-logs
-          path: test-results/validation-*/*.log
+          path: |
+            test-results/validation-*/*.log
+            test-results/validation-*/summary.json
+            test-results/*/evidence.json
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:

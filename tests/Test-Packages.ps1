@@ -42,6 +42,13 @@ if([version]$baselineVersion -ge [version]'0.3.0'){
     $protected+=@((Get-ControllerPreferencesPath $oldConfig),(Join-Path $data 'API\api-providers.local.json'))
 }
 $hashes=@{};foreach($path in $protected){$hashes[$path]=(Get-FileHash -LiteralPath $path).Hash}
+# Preserve the actual installed public baseline, including its compiled host,
+# so rollback is checked against bytes from this installation, not source only.
+$baselineHashes=@{}
+foreach($item in @(Get-ChildItem -LiteralPath $install -File -Recurse)){
+    $relative=$item.FullName.Substring($install.Length+1)
+    if($relative -notmatch '^(state|upgrades)\\'){$baselineHashes[$relative]=(Get-FileHash -LiteralPath $item.FullName).Hash}
+}
 # Load upgrade functions in a fresh process: .NET types from the old package must
 # not mask a missing assembly/source in the new package.
 $driver=Join-Path $root 'upgrade-driver.ps1'
@@ -62,6 +69,17 @@ foreach($path in $protected){Check ((Get-FileHash -LiteralPath $path).Hash -eq $
 Check (Test-Path -LiteralPath "$install\src\TomlConfig.cs") 'Packaged upgrade includes new runtime source'
 & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$install\src\Controller.ps1" -ConfigPath "$install\instances.local.json" -Action panel -SmokeTest -ScreenshotPath "$root\upgraded-panel.png"
 Check ($LASTEXITCODE -eq 0 -and (Test-Path "$root\upgraded-panel.png")) 'Installed upgraded package renders functioning panel'
+$snapshots=@(Get-ChildItem -LiteralPath (Join-Path $install 'upgrades') -Filter upgrade.local.json -Recurse -File)
+Check ($snapshots.Count -eq 1) 'Actual public-baseline upgrade creates one rollback snapshot'
+& powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$upgrade\scripts\Rollback-Upgrade.ps1" -Snapshot $snapshots[0].DirectoryName
+Check ($LASTEXITCODE -eq 0 -and (Get-Content "$install\version.json" -Raw|ConvertFrom-Json).version -eq $baselineVersion) 'Packaged rollback restores actual public baseline version'
+foreach($relative in $baselineHashes.Keys){
+    $restored=Join-Path $install $relative
+    if(-not (Test-Path -LiteralPath $restored) -or (Get-FileHash -LiteralPath $restored).Hash -ne $baselineHashes[$relative]){throw ('Rollback differs from installed baseline: '+$relative)}
+}
+Check $true 'Packaged rollback restores every original tool file, compiled host and local configuration'
+foreach($path in $protected){if((Get-FileHash -LiteralPath $path).Hash -ne $hashes[$path]){throw ('Rollback changed protected fixture: '+[IO.Path]::GetFileName($path))}}
+Check $true 'Packaged rollback preserves all protected configuration and credential fixtures'
 $freshInstall=Join-Path $root 'FreshInstall';$freshData=Join-Path $root 'FreshData';$freshOfficial=Join-Path $root 'FreshOfficial'
 $freshDriver=Join-Path $root 'fresh-driver.ps1'
 $freshText=@'

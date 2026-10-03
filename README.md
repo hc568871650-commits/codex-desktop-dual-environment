@@ -1,62 +1,90 @@
-﻿# Codex Desktop 双开 · 两个窗口，同时分工
+# Codex Desktop 双环境
 
-**在 Windows 上同时运行两套 Codex Desktop，一边使用官方订阅，一边接入自选 API 渠道，分别处理不同任务。**
+**在 Windows 上同时使用官方订阅与自选 API，用一个控制器管理两个 Codex Desktop。**
 
-两个完整的 Desktop 界面可以同时打开、分别操作，无需先退出一边再使用另一边。两套环境各自使用配置与凭据入口，可分别设置模型、项目与无项目任务目录；你可以把工作分给两边，让它们并行推进。
+两套 Desktop 可以同时打开，分别使用自己的配置与凭据入口。你负责把任务分给两个窗口；控制器负责启动、找回窗口、管理 API 渠道，以及提供 API 任务提醒。
 
-例如，你可以这样安排分工：
+[公开版下载](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/latest) · [快速开始](#快速开始) · [升级指南](docs/UPGRADE.md) · [0.8.8 发布说明](docs/RELEASE-0.8.8.md) · [验证记录](docs/VALIDATION.md)
 
-| 同时打开的 Desktop | 接入方式 | 分工示例 |
-|---|---|---|
-| 官方环境 | 现有官方订阅 | 主项目开发、方案设计 |
-| API 环境 | 自选 API 地址、模型与密钥 | 代码审查、资料整理或另一个项目 |
+> **当前版本：v0.8.8。** 本次从公开版 v0.8.3 累计更新，包含 0.8.4–0.8.8 的变化；0.8.4–0.8.7 为本机迭代，未单独公开发布。附件、校验清单与最终发布状态见 [v0.8.8 Release](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/tag/v0.8.8)。
 
-任务由你分别交给两个窗口，工具负责双环境部署和实例控制，不自动分配或同步任务。当前标准安装提供“官方订阅 + API”这一组双开环境。
+![0.8.8 双环境控制面板](docs/images/0.8.8/overview-dark.png)
 
-日常可通过任务栏入口、小控制面板或托盘菜单分别打开、找回和退出两边；重复点击会定位已有实例。小控制面板是管理这两个 Desktop 的入口。
+*新版真实 WinForms 界面，以独立示例配置渲染；图中未运行状态不表示任务空闲。本文配图不含真实凭据或聊天。*
 
-**当前版本 0.8.3：** [下载发布包](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/tag/v0.8.3) · [更新说明](docs/VERSION-0.8.3.md) · [快速开始](#快速开始) · [升级指南](docs/UPGRADE.md)
+## 可以做什么
 
-**公开版本不连续：** v0.5.0 之后发布 v0.7.0（0.6.x 未单独公开）；本次从 v0.7.0 直接到 v0.8.3，0.8.0–0.8.2 是本机迭代，未单独公开。本次累计包含这些版本的改动。
+| 日常需要 | 控制器提供的能力 |
+|---|---|
+| 同时使用官方与 API | 保留官方环境，使用独立 API home、profile 和目录；可同时打开两边 |
+| 找回正在运行的窗口 | 先核验实例身份，再定位已有窗口；多个主窗口时选择，不盲目重复启动 |
+| 管理 API 接入 | 保存与切换渠道、对接 CC Switch、备份恢复；运行期间切换渠道暂存至下次启动 |
+| 减少后台任务等待 | API 任务完成卡片、最近完成列表、点击返回目标任务 |
+| 调整日常交互 | 深色/浅色/跟随系统、强调色、窗口位置、聚焦与置顶、自启动 |
+| 检查和维护环境 | 常用目录入口、脱敏诊断、安装升级、备份与回滚 |
 
-0.8.3 增加通知显示时长与动画设置、实际圆角裁切，以及通知页待处理视图和角落紧凑作答窗口（默认 480×380）。普通提示悬停或获得焦点后仍按时间关闭；作答窗口保持显示供输入。连接提问服务与预览不代表日常 API Desktop 已接入桥接：真实 Desktop 提问、答案回传、原窗口同步和精确返回任务尚未完整验收，日常桥接未启用。隔离桥接实验不在安装包中。详见[功能与边界](docs/VERSION-0.8.3.md)。
+官方版仍可打开、定位和退出；**自动完成提醒与最近完成列表仅面向已登记的 API 实例**。
 
-安装包内可在控制器“通知 → 待处理 → 预览提问”查看不发送真实答案的界面，也可运行 `powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts\Preview-Questions.ps1`；`Preview-Questions*.cmd` 仅供源码检出时使用，不随安装包提供。
+独立配置不等于文件沙箱。两个进程仍具有当前 Windows 用户的文件权限；同时修改同一项目时，请使用不同目录或 Git worktree。本工具不会自动分派任务或同步聊天。
 
-0.5 更新主面板与标题栏：暖白中性色、简洁按钮和清晰层级；状态查询、窗口打开等待及环境检查移到后台，操作立即反馈，等待时仍可移动或收起面板。右键菜单加入环境目录、最近完成与通知控制；完成卡片支持查看任务、自动收起和暂停提醒。任务链接使用核验后的目标实例参数，真实双端页面导航仍待验收，见[说明](docs/TASK-LINKS-0.5.md)。
+## 新版通知与提问体验
 
-0.4.1 新增独立任务完成提示：点击卡片打开对应环境，单条贴底、关闭后补位。后台监听不阻塞面板，首次启用不重放历史，可从托盘右键暂停。0.6 起托盘单击打开 API 版，双击打开控制面板。
+### 一张卡片，直接打开
 
-0.4 新增**同时打开两边**、各自的**常用目录**入口和**可复制、导出的脱敏环境检查报告**。打开结果分别反馈，一边失败仍会尝试另一边；取消选窗和前台切换受限也会如实提示。诊断不包含个人路径、渠道地址或密钥，不发送 API 请求。
+完成提示和待回答提示采用统一布局：短状态、正文和右上角 **×**。点击卡片主体打开任务或问题，点击 × 只关闭提示。同一时刻保留一张提示卡片，完成记录和待处理问题仍可从控制台查看。
 
-0.3 集中改善双开体验：托盘左键显示并保留小面板，记忆窗口位置；两个环境可以分别改名及恢复默认名称；API 卡片可保存、切换渠道，也可选择由 CC Switch 管理；自启动通过面板开关按需开启，登录后直接显示控制面板。API 运行期间选择新渠道只暂存，等下次启动时再成套应用地址、模型与密钥。
+| 深色完成提示 | 浅色完成提示 |
+|---|---|
+| ![深色完成提示](docs/images/0.8.8/completion-dark.png) | ![浅色完成提示](docs/images/0.8.8/completion-light.png) |
 
-独立配置不等于文件访问沙箱：两边仍可访问当前 Windows 用户有权限的文件。并行修改代码请使用不同目录或 Git worktree；实际验证范围见[验证与边界](#验证与边界)。
+API 主窗口在前台时，自动完成提示保持静默，最近完成记录仍更新；切回后台不会补弹旧事件。这里的前台判断针对核验后的 **API 实例**，不是逐个聊天标签页判断。显式预览仍会展示。
 
-## 从旧版升级
+通知开关、暂停、恢复和显示设置集中在控制台。托盘的通知页只保留设置、待处理问题与最近完成入口。
 
-将新包解压到新目录后运行 **Start.cmd** 或 **Install.cmd**。入口自动识别原安装并备份升级，不必重填密钥；相同版本且文件完整时直接打开。多个候选目录时才要求选择；0.1 仅有旧设置而无法确定工具位置时，也会要求选择。控制器运行中会提示先退出它，Codex 可继续运行。`Upgrade.cmd` 保留为手动选择目录的入口；详情见[升级指南](docs/UPGRADE.md)。
+![简化后的通知快捷页](docs/images/0.8.8/quick-notifications-dark.png)
+
+### 提问按场景出现，回答确认后收起
+
+**以下真实问答行为需要另外配置并核验提问桥接，标准安装不会自动启用。**
+
+| 场景 | 当前行为 |
+|---|---|
+| API 窗口在前台 | 新问题保留 Codex 原生作答入口 |
+| API 窗口在后台 | 按偏好显示提醒、非聚焦小窗或聚焦小窗 |
+| 已接管问题返回前台 | 确认交回原生入口后收起外部界面；不重复提交 |
+| 外部回答成功 | 收到成功回执，在同一次界面更新中收起对应窗口和通知 |
+| 其他入口已处理、迟到的成功确认 | 下一次有效状态同步后收起；正常轮询间隔约 0.9 秒 |
+| 连接失败或结果不明 | 保留作答窗口和草稿，提示状态并禁止不确定的重复提交 |
+
+![紧凑作答窗口：真实控件与示例题目](docs/images/0.8.8/question-dark.png)
+
+作答窗支持多题滚动、选项、自由输入和敏感内容遮罩；默认约 480 × 380，可调整大小。关闭窗口不会替你回答或取消问题。预览没有真实提交，所以会保留“答案未发送”的反馈。
+
+**交付边界：**标准 ZIP 包含问题界面、待处理视图和连接客户端，但不包含 `experiments/notification-bridge` 的代理程序、机器绑定或生产安装流程。普通用户可在“通知 → 待处理 → 预览提问”查看界面；维护者可从[桥接实验说明（需检出源码）](https://github.com/hc568871650-commits/codex-desktop-dual-environment/tree/v0.8.8/experiments/notification-bridge)建立独立试验环境。已配置的桥接在身份、程序版本或绑定校验失败时回退原生入口。审批和未知交互继续由 Codex 处理。
 
 ## 快速开始
 
-要求：Windows x64、系统自带的 **64 位 Windows PowerShell 5.1 + .NET Framework / WinForms**、已安装的 Codex Desktop。无需 Node、Python 或额外 SDK。ARM64/32 位进程识别未支持；身份读取受限时停止操作。
+要求：**Windows x64、Windows PowerShell 5.1、.NET Framework / WinForms，以及已安装的 Codex Desktop**。正常安装不需要 Node.js、Python 或额外 SDK；ARM64 与 32 位进程识别未支持。
 
-1. 完整解压工具到新目录，双击 `Start.cmd` 或 `Install.cmd`，两者使用相同的自动识别流程。
-2. 没有已有安装时，才输入官方 `CODEX_HOME` 的绝对路径、API 地址、模型 ID 和密钥；升级时复用原配置。密钥隐藏输入，使用当前 Windows 用户 DPAPI 加密。
-3. 默认工具装入 `%LOCALAPPDATA%\CodexDualController`，新 API 数据装入 `%LOCALAPPDATA%\CodexDualData\API`。官方数据保持原位，默认沿用原生 Desktop profile，不复制官方认证或历史。
-4. 使用生成的 **Codex Dual Controller**（控制面板）、**Codex Official**（官方版）、**Codex API**（API 版）快捷方式。安装过程不启动或关闭 Codex。
-5. 打开小面板，点击所需环境的“打开”。可右键安装目录的 `CodexDualController.exe` 选择“固定到任务栏”。托盘单击启动或找回 API 版，双击及任务栏入口找回原面板，右键显示快捷面板；关闭面板收起到托盘。已运行时定位已有窗口；多个主窗口时选择；未运行时才启动。
-6. 点击“同时打开两边”依次找回或启动两个环境；点击各卡片“常用目录…”进入项目、无项目任务或配置目录。“检查环境”可复制、导出脱敏报告。点击“改名”区分用途；“管理 API”进入渠道、CCS 接入及备份恢复。在“偏好设置”中需要自启动时勾选“登录时自动打开控制面板”，默认关闭；控制器未运行时可双击桌面的 `Codex Dual Controller.lnk`。
+1. 从公开 Release 下载完整包，解压到新目录，双击 **Start.cmd** 或 **Install.cmd**。
+2. 首次安装时填写官方 `CODEX_HOME` 路径、API 地址、模型 ID 和密钥。密钥使用隐藏输入，并由当前 Windows 用户的 DPAPI 加密保存。已有安装走升级流程，复用原配置。
+3. 默认控制器安装到 `%LOCALAPPDATA%\CodexDualController`，API 数据位于 `%LOCALAPPDATA%\CodexDualData\API`。官方数据保持原位，不复制其认证和历史；安装过程不启动或关闭 Codex。
+4. 使用生成的 **Codex Dual Controller**、**Codex Official**、**Codex API** 快捷方式。面板里分别打开环境，也可以点击“同时打开两边”。
+5. 需要时在“管理 API”“通知”“偏好设置”中调整渠道、提醒和窗口行为。自启动默认关闭，可按需开启。
 
-已有官方 `config.toml` 必须具有可解析的 `[desktop] projectlessWorkspaceRoot`；安装器读取该设置并保留它，缺失时提示手动设置，不静默改写原配置。没有任何数据的全新官方目录才会生成最小配置。
+| 入口 | 操作 |
+|---|---|
+| 托盘单击 | 启动或找回 API 窗口 |
+| 托盘双击 / 控制面板快捷方式 | 找回控制面板 |
+| 托盘右键 | 打开快捷操作面板 |
+| 控制面板 × | 收起到托盘 |
+| 退出控制器 | 仅退出控制器，Codex 保持运行 |
 
-![任务栏小面板](docs/images/panel-0.5.png)
+![浅色偏好设置](docs/images/0.8.8/settings-light.png)
 
-![实际托盘菜单](docs/images/tray-0.5.png)
+安装器需要能解析已有官方配置的 `[desktop] projectlessWorkspaceRoot`。首次安装遇到缺失或复杂写法时会提示处理，不静默重写已有官方配置；升级的兼容规则见[升级指南](docs/UPGRADE.md)。
 
-截图来自真实 WinForms 界面和独立夹具配置，不包含真实密钥或聊天。状态表示实例进程，不表示任务空闲或完成。
-
-可指定部署位置、官方 profile、安装目录或桌面程序路径：
+自定义路径可使用安装入口：
 
 ```powershell
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts\Bootstrap.ps1 `
@@ -64,68 +92,47 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts\Bootstrap.p
   -OfficialHome 'C:\MyCodexHome' -Executable 'C:\InstalledCodex'
 ```
 
-不要把密钥写进命令行；留空由安装器交互安全询问。示例路径仅是占位，工具没有内置个人路径、服务商、PID 或 Codex 版本号。Store 程序每次动态查询；其他安装方式需指定目录或 EXE（由用户确认是桌面版，不是 CLI）。
+示例路径为占位；不要把密钥写进命令行。Store 版动态查询实际程序路径，其他安装方式可指定 Desktop 目录或 EXE，不能选择 Codex CLI。已有双环境可用 [Register-Existing.ps1](scripts/Register-Existing.ps1) 登记，保留原外部启动器及其凭据管理，详见[操作说明](docs/USAGE.md)。
 
-## 已有双环境
+## 升级、回滚与数据保留
 
-使用 [Register-Existing.ps1](scripts/Register-Existing.ps1) 生成单独控制配置；原 API 启动器仍负责凭据加载。这个流程只记录路径，不读取认证、复制历史或改写原环境。
+推荐把新包解压到新目录，再运行 **Start.cmd**，让统一入口识别旧安装、备份并升级。只需退出控制器，已有 Codex 任务可以继续运行。多个安装候选时才要求选择；也可用 **Upgrade.cmd** 手动选择工具目录。
 
-```powershell
-.\scripts\Register-Existing.ps1 `
-  -OfficialHome 'C:\ExistingOfficial\Home' -OfficialProjects 'C:\ExistingOfficial\Projects' `
-  -OfficialProjectless 'C:\ExistingOfficial\Projectless' `
-  -ApiRoot 'C:\ExistingAPI' -ApiLauncher 'C:\ExistingAPI\Launcher\Start-API.ps1' `
-  -ConfigPath 'C:\CodexDual\Control\instances.local.json'
-.\Controller.cmd -ConfigPath 'C:\CodexDual\Control\instances.local.json'
-```
+- 实例 ID、API 配置、凭据、项目和聊天数据不属于工具覆盖范围。
+- 升级备份保存在 `upgrades` 目录，可用 **Rollback.cmd** 选择备份恢复；恢复前核验文件哈希。
+- 卸载按清单移除未修改的工具文件和快捷方式，保留用户数据、本机配置及修改过的文件。
+- 首次启用或替换提问代理，需要在任务结束后完整退出并重启 API Desktop；重启控制器不会把新代理注入已有进程。沿用代理的普通控制器升级没有这个要求。
 
-注册采用 API 根目录下 `CodexHome / DesktopProfile / Projects / Projectless` 约定。若原结构不同，可按[配置模板](config/instances.example.json)调整。外部启动脚本仅在确认未运行时执行，控制器不改写它；脚本的全局副作用需要自行审阅。外部启动器实例继续由原工具管理 API，仍可使用面板、改名和自启动。`Configure.cmd` 统一进入控制器的 API 管理入口。
+完整步骤见[升级指南](docs/UPGRADE.md)。快捷方式可以移入收纳应用，但工具安装目录不应随意搬动；移动后的快捷方式需要手动清理。若旧 WScript 接口遇到中文完整路径兼容问题，可使用 `-ShortcutDirectory 'D:\CodexDual\Shortcuts'` 创建新的英文路径入口，不必搬动数据。
 
-## 实例控制规则
+## 实例识别与已知边界
 
-- 每个实例有稳定 UUID，保存 home、profile、项目目录、无项目目录及启动方式。
-- 进程识别结合完整 EXE 路径、解析后的 profile、只读 `CODEX_HOME`、PID 和创建时间。运行记录不含密钥、命令行或窗口标题。重启控制器后从进程重新识别，不信任失效 PID。
-- 未知归属、同 profile 不同 home、多个主进程、路径缺失时拒绝操作。无 profile 参数本身不代表官方版。
-- 每个环境独立操作锁；控制器每个 Windows 用户会话仅运行一份。退出控制器不退出 Codex。
-- Store 版先通过原生单实例入口唤起，随后仅聚焦应用已显示的主窗口；不强制显示隐藏窗口。Windows 可以拒绝抢占前台，此时明确提示；不会操作另一个实例凑出“成功”。原窗口已销毁时报告无可恢复窗口，不重复启动。
-- 退出先提醒检查任务，再向该实例所有主窗口发送正常关闭请求。仍驻留时单独询问是否强制结束，默认否。
-- 强制结束只处理身份再次通过核验的主进程及同 EXE 的桌面子进程，持有进程句柄并再核对创建时间以防 PID 复用。不会按 `ChatGPT.exe`/`codex.exe` 名称批量终止。
-- 无法充分确认的 app-server、终端、服务器和编辑器不强杀，残留报告说明保留的进程。因此“桌面已退出”不等于所有任务外部进程已停止。
-- 从某个 Codex 任务里直接调用退出命令时，祖先进程保护会拒绝退出承载该命令的实例。托盘控制器无法判断所有其他窗口的任务状态，必须由用户检查。
+控制器结合完整 EXE 路径、Desktop profile、只读 `CODEX_HOME`、PID 和创建时间确认实例。归属不明时停止操作；不按 `ChatGPT.exe` 或 `codex.exe` 名称批量结束进程。正常退出后仍驻留时，强制结束需要单独确认；不能确认归属的外部任务进程会保留并报告。
 
-## 卸载与回滚
+Windows 可能拒绝后台抢占前台，控制器会提示实际结果。进程“已运行”不表示任务空闲，也不保证任务已结束。不同 Codex 版本、多窗口导航、历史恢复和全部原生通知类型仍有待覆盖，不能把局部测试视为完全兼容。
 
-先从托盘退出控制器，然后运行安装目录的 `Uninstall.cmd`。它按安装清单和文件哈希删除新增工具文件、原位置未修改的快捷方式，并移除本安装仍匹配的自启动登记，**保留两套数据、凭据、本机配置和修改过的文件**。不修改系统环境变量、其他启动项、协议关联或官方程序包。
+0.8.8 发布候选在 Windows PowerShell 5.1 下通过 **29 套控制器回归及 7 套桥接 fixture 检查**，覆盖同步/异步回答、前后台切换和多连接路由；此前的 116 项专项证据继续保留。后台真实日常模型问答、所有窗口/通知组合、精确聊天导航与历史恢复尚未全面验收，实验桥接仍不作为标准包能力交付。最终 CI、附件与验证范围见 [Release](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/tag/v0.8.8) 和[验证记录](docs/VALIDATION.md)。
 
-### 快捷方式与英文路径
-
-维护版本生成的快捷方式统一使用英文文件名：`Codex Dual Controller.lnk`、`Codex Official.lnk`、`Codex API.lnk`，界面仍为中文。已有环境部署入口也使用 `Codex Dual Controller.lnk`。v0.2.0 发布附件已于 2026-09-11 同步此修复；此前下载的旧附件请重新下载。
-
-为兼容英文 Windows 等系统，建议快捷方式保存的**完整目录路径**也只包含英文字母、数字、空格及常规路径符号，例如 `D:\CodexDual\Shortcuts`。仅修改 `.lnk` 文件名，不能解决其上级目录含中文时的旧 WScript 接口兼容问题。中文 Windows 上原有中文路径可能正常，不需要因此搬动已经正常使用的环境。
-
-安装器默认仍使用系统实际桌面目录，支持桌面位于 D 盘；需要避开中文桌面路径时，可为安装命令附加 `-ShortcutDirectory 'D:\CodexDual\Shortcuts'`。已有环境部署脚本 `scripts/Deploy-Controller.ps1` 也支持此参数。该参数只指定新快捷方式的位置，不会移动桌面、改名用户目录或更改 Codex 数据路径。安装后可将快捷方式导入收纳软件；移动后的原位置卸载追踪限制见下文。
-
-快捷方式可以移入收纳应用，目标、配置与图标均采用固定绝对路径。移动后卸载器不会扫描寻找它，请手动删除。工具安装目录本身不能随意移动；要更换位置应重新生成快捷方式。
-
-重复安装保留已有配置和密钥。安装中断的新增工具文件有清单可回滚；用户数据即使是此次新建，也保留供检查。卸载后留下的配置不等于仍已安装，重新使用时可从完整解压目录传 `-ConfigPath` 指向它。
-
-历史迁移是[独立可选流程](docs/MIGRATION.md)，不属于默认安装，也没有自动复制认证文件的功能。
-
-## 验证与边界
-
-详见[测试结果](docs/VALIDATION.md)、[设计与故障排查](docs/USAGE.md)、[通知与窗口标识研究](docs/NOTIFICATIONS.md)。
-
-- 历史自动检查覆盖核心、实例控制（真实 WinForms 子进程）、托盘单双击与面板位置、API 配置保护和 CCS 交接、改名/重置、自启动、安装卸载、旧版升级回滚及编译 EXE 的实际按钮操作。各轮结果及 0.8.3 验证范围见[测试记录](docs/VALIDATION.md)。
-- 本机 Store Codex **26.903.9818.0** 的两个全新隔离实例已验证同时启动、重复启动去重、进程重新识别和正常关闭后的后台驻留检测。
-- 本机真实 Codex 已经用户确认：通过原生单实例入口唤起后，窗口内部点击恢复正常，原进程不变。直接 ShowWindow 唤起已停用。其他版本和多窗口场景仍需补验。
-- 0.8.3 的隔离 CLI 问答用本机 Responses fixture 验证了局部回路，未使用真实 API 密钥或远端模型；真实 Desktop 提问、答案回传、原窗口同步和任务精准跳转仍未完整验收。历史桌面验证也不证明聊天历史或实际任务落盘隔离。
-- 不展示“空闲/任务完成”，不保证原生托盘、任务栏分组或通知能区分两个实例。不修改官方包，不关闭系统安全功能。
+## 开发与版本记录
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\Test-Core.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\Test-Instances.ps1 -Integration
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\Test-Install.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\Build-Release.ps1
+# Windows PowerShell 5.1，逐进程运行控制器测试
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File tests\Test-All.ps1
+
+# 从当前控件生成脱敏文档配图，使用独立示例配置
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts\Export-DocumentationImages.ps1
 ```
 
-`tests/Test-Desktop.ps1 -RunIsolatedDesktop` 是显式开启的真实桌面测试，会新建两个无真实凭据的测试实例；正常关闭后如果驻留，不自动强杀。测试产物留在被忽略的 `test-results`。发布包仅选取源码、入口、模板、固定图标和文档，不包含用户运行数据。
+| 版本 | 主要变化 |
+|---|---|
+| [0.8.8](docs/VERSION-0.8.8.md) | 成功回答及时收起、延迟确认恢复、连接确认与旧回执隔离 |
+| [0.8.7](docs/VERSION-0.8.7.md) | 通知卡片和作答窗精简，通知控制集中 |
+| [0.8.6](docs/VERSION-0.8.6.md) | API 前台原生提问、后台独立作答、切换时防重复 |
+| [0.8.5](docs/VERSION-0.8.5.md) | 前台完成提示静默、断管异常修复、多连接路由 |
+| [0.8.4](docs/VERSION-0.8.4.md) | API 专属提醒、窗口行为、本机桥接绑定 |
+| [0.8.3](docs/VERSION-0.8.3.md) | 已公开：通知时长/动画/圆角、紧凑作答与待处理视图 |
+| [0.7](docs/VERSION-0.7.md) 及以前 | 主题与通知页、双环境管理、API 渠道、安装升级和诊断 |
+
+历史公开版本有跳跃：0.6.x、0.8.0–0.8.2、0.8.4–0.8.7 未单独公开。历史文档保留当时状态，判断当前能力请从本 README 和最新验证记录进入。
+
+[操作与排错](docs/USAGE.md) · [自动安装](docs/AUTO-SETUP.md) · [可选历史迁移](docs/MIGRATION.md) · [配图来源](docs/images/0.8.8/README.md)

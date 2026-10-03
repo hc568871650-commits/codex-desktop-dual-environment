@@ -13,7 +13,7 @@ $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('bridge-transport-' + [guid]::
 function Assert($condition, [string]$message) { if (-not $condition) { throw $message } }
 function Read-Line($stream) {
     $task = $stream.ReadLineAsync()
-    if (-not $task.Wait(5000)) { throw 'Timed out waiting for mock stdout.' }
+    if (-not $task.Wait(8000)) { throw 'Timed out waiting for mock stdout.' }
     if ($null -eq $task.Result) { throw 'Unexpected mock EOF.' }
     return ($task.Result | ConvertFrom-Json)
 }
@@ -297,6 +297,28 @@ try {
         } finally { Close-Case $second }
     } finally { $client.Pipe.Dispose() }
 } finally { Close-Case $case }
+
+Write-Output 'RUN restarting-owner-handoff'
+$case = Start-Case 'restarting-owner-handoff'
+try {
+    1..3 | ForEach-Object { [void](Read-Line $case.Process.StandardOutput) }
+    $client = Connect-Pipe $case.Pipe
+    try { $firstConnection = (Command $client @{ command='snapshot' }).pending[0].connectionId }
+    finally { $client.Pipe.Dispose() }
+    $second = Start-SameCase $case
+    try {
+        Start-Sleep -Milliseconds 300
+        $case.InputWriter.Close()
+        Assert ($case.Process.WaitForExit(5000)) 'Old owner did not finish EOF shutdown.'
+        1..3 | ForEach-Object { [void](Read-Line $second.Process.StandardOutput) }
+        $client = Connect-Pipe $second.Pipe
+        try {
+            $snapshot = Command $client @{ command='snapshot' }
+            Assert ($snapshot.pending.Count -eq 1 -and $snapshot.pending[0].connectionId -ne $firstConnection) 'Replacement stayed native after old owner exited.'
+            $results += 'replacement acquires pipe after bounded old-owner EOF shutdown'
+        } finally { $client.Pipe.Dispose() }
+    } finally { Close-Case $second }
+} finally { $case.Process.Dispose() }
 
 $results | ForEach-Object { Write-Output ('PASS ' + $_) }
 Write-Output ('Test files: ' + $tempRoot)

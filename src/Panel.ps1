@@ -58,13 +58,13 @@ function Save-PanelPosition {
         Save-ControllerPreferences $config $saved;$script:preferences=$saved
     }catch{Set-UiMessage ('位置未保存：'+$_.Exception.Message)}
 }
-function Show-ControlPanel {
-    if($panel.WindowState -eq 'Minimized'){$panel.WindowState='Normal'}
+function Show-ControlPanel([switch]$WithoutFocus) {
+    $behavior=Get-WindowBehavior $script:preferences
     $saved=if($script:positionInitialized){@{x=$panel.Left;y=$panel.Top}}else{$script:preferences.panel}
     $areas=@([Windows.Forms.Screen]::AllScreens|ForEach-Object {$_.WorkingArea})
     $point=Get-VisiblePanelPoint $saved $panel.Width $panel.Height $areas
     $panel.Location=New-Object Drawing.Point($point.x,$point.y);$script:positionInitialized=$true
-    $panel.Show();$panel.Activate();Update-PanelStatus
+    $panel.Present((-not $WithoutFocus -and $behavior.panelMode -eq 'focus'),[bool]$behavior.panelOverlay);Update-PanelStatus
 }
 function Show-NameDialog($Instance) {
     $dialog=New-Object CodexDual.ShellForm;$dialog.Text='修改显示名称';$dialog.ClientSize=New-Object Drawing.Size(390,165)

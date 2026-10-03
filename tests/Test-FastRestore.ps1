@@ -74,6 +74,7 @@ try {
         $w=@([CodexDual.Native]::Windows($api.Process.Id)|Where-Object {$_.Visible})
         $w.Count -eq 1 -and [FastRestoreWindowState]::IsIconic([IntPtr]$w[0].Handle)
     } 'API fixture minimized'
+    Check (-not [CodexDual.Native]::IsInstanceForeground($exe,$api.Home,$api.Profile)) 'Minimized API does not suppress notifications'
     $outcome=Focus $api
     Wait-For {
         $w=@([CodexDual.Native]::Windows($api.Process.Id)|Where-Object {$_.Visible})
@@ -81,6 +82,16 @@ try {
     } 'API fixture restored'
     Check ($outcome -in @('Shown','Running') -and (Test-ExpectedProcessAlive $api.Process)) 'Minimized API restores without changing PID or identity'
     Check (Test-ExpectedProcessAlive $official.Process) 'API focus leaves the independent official instance alive'
+    Wait-For {[CodexDual.Native]::IsInstanceForeground($exe,$api.Home,$api.Profile)} 'API fixture foreground'
+    Check ([CodexDual.Native]::IsInstanceForeground($exe,$api.Home,$api.Profile)) 'Foreground API recognized by executable, home and profile'
+    Check (-not [CodexDual.Native]::IsInstanceForeground($exe,$official.Home,$api.Profile)) 'Same window with wrong home does not suppress notifications'
+    Check (-not [CodexDual.Native]::IsInstanceForeground($exe,$api.Home,$official.Profile)) 'Same executable with another profile does not suppress notifications'
+    Check (-not [CodexDual.Native]::IsInstanceForeground((Join-Path $root 'other.exe'),$api.Home,$api.Profile)) 'Wrong executable does not suppress notifications'
+    Check (-not [CodexDual.Native]::IsInstanceForeground($exe,'','')) 'Missing routing identity cannot suppress notifications'
+    [void](Focus $official)
+    Wait-For {[CodexDual.Native]::IsInstanceForeground($exe,$official.Home,$official.Profile)} 'other instance foreground'
+    Check (-not [CodexDual.Native]::IsInstanceForeground($exe,$api.Home,$api.Profile)) 'Official foreground leaves background API notifications enabled'
+    [void](Focus $api)
 
     foreach($field in @('Started','Path','Command')) {
         $stale=$api.Process.PSObject.Copy()

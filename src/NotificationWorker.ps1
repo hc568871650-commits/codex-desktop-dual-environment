@@ -29,7 +29,8 @@ try {
     while(-not (Test-Path -LiteralPath $stop)){
         try{$parent=[Diagnostics.Process]::GetProcessById($ParentProcessId);try{if($parent.StartTime.ToUniversalTime().Ticks -ne $ParentStarted){break}}finally{$parent.Dispose()}}catch{break}
         foreach($completion in @(Read-MonitorCompletions $monitor)){
-            $instance=@($config.instances|Where-Object {$_.id -eq $completion.InstanceId})[0]
+            $instance=Get-ApiFeatureInstance $config $completion.InstanceId
+            if(-not $instance){continue}
             $title=try{Get-CompletionTaskTitle $instance $completion.ThreadId}catch{'任务已完成'}
             $path=Join-Path $inbox ($completion.InstanceId+'-'+[Guid]::NewGuid().ToString('N')+'.local.json');Assert-NoReparsePoint $path
             Write-AtomicText $path (@{schema=1;epoch=$Epoch;eventId=[Guid]::NewGuid().ToString('N');instanceId=$completion.InstanceId;threadId=$completion.ThreadId;turnId=$completion.TurnId;title=$title;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Compress)

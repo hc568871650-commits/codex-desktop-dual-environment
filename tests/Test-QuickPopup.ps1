@@ -49,14 +49,20 @@ try{
     Check ($script:calls[2] -eq 'directory:api:projectless') 'Directory row retains environment and directory kind'
     $thread=[Guid]::NewGuid().ToString()
     $script:completionHistory=@([pscustomobject]@{instanceId=('b'*32);threadId=$thread;title="任务`n标题"})
+    $script:completionHistory+=@([pscustomobject]@{instanceId=('a'*32);threadId=[guid]::NewGuid().ToString();title='官方记录不得展示'})
     Show-QuickPopup $anchor 'recent'
+    Check (@($script:quickBody.Controls|Where-Object {$_.Tag -and $_.Tag.action -eq 'task'}).Count -eq 1 -and $script:quickSubtitle.Text -like '*1 条*') 'Recent popup filters official records before counting and pagination'
+    $script:notificationListMode='history';$script:notificationHistoryPage=0
+    Initialize-NotificationsPage $panel;Update-NotificationView -Force
+    Check (@($script:notificationHistoryBody.Controls|Where-Object {$_ -is [CodexDual.QuickActionButton]}).Count -eq 1 -and -not @($script:notificationHistoryBody.Controls|Where-Object {$_.Text -eq '官方记录不得展示'}).Count) 'Notifications page only renders API history'
     $task=Row 'task';Check (-not $task.Text.Contains("`n")) 'Recent task titles remove control characters'
     $task.PerformClick()
     Check ($script:calls[3] -eq ('task:api:'+$thread)) 'Recent row preserves the exact task and environment'
     Show-QuickPopup $anchor 'notifications'
-    (Row 'snooze').PerformClick()
-    Check ($script:calls[4] -eq 'snooze:15' -and $script:quickPopup.Visible -and $script:quickPopupPage -eq 'notifications') 'Notification pause stays on its own page with updated state'
-    Check (-not @($script:quickBody.Controls|Where-Object {$_.Text -eq '通知设置'}).Count) 'Notification page has no settings detour'
+    Check ($script:quickPopup.Height -eq 260 -and @($script:quickBody.Controls).Count -eq 3) 'Notification shortcuts fit a compact page with three entries'
+    (Row 'notification-settings').PerformClick()
+    Check ($script:calls[4] -eq 'panel' -and $script:calls[5] -eq 'page:notifications' -and -not $script:quickPopup.Visible) 'Notification settings open only in the controller console'
+    Show-QuickPopup $anchor 'notifications'
     Invoke-QuickPopupCommand @{action='page';page='recent'};Go-QuickPopupBack
     Check ($script:quickPopupPage -eq 'notifications') 'Back from notification history returns to notifications'
     Show-QuickPopup $anchor 'home'
@@ -81,7 +87,7 @@ try{
     Check ($script:quickRecentPage -eq 0 -and (Row 'task').Text -eq '完成记录 1') 'Previous page returns without losing cached history'
     $script:completionReady=$false
     Show-QuickPopup $anchor 'notifications';Refresh-QuickPopupState
-    Check (-not (Row 'notification-toggle').Enabled -and $script:quickPopup.Visible) 'Unavailable notifications leave navigation usable without reading missing worker state'
+    Check ((Row 'notification-settings').Enabled -and $script:quickPopup.Visible) 'Unavailable notifications retain the console settings entry'
     $script:completionReady=$true
     $out=Join-Path ([IO.Path]::GetFullPath("$PSScriptRoot\..\test-results")) ('quick-popup-'+[Guid]::NewGuid().ToString('N'));[void][IO.Directory]::CreateDirectory($out)
     foreach($page in @('home','notifications','recent','more','appearance')){Show-QuickPopup $anchor $page;[Windows.Forms.Application]::DoEvents();Save-UiScreenshot $script:quickPopup (Join-Path $out ($page+'.png'))}

@@ -92,12 +92,12 @@ try{
     Show-CompletionCard $config.instances[1]
     $real=$script:completionCards[0]
     Show-CompletionPreview
-    Check ($script:completionCards.Count -eq 2 -and -not $real.IsDisposed -and $script:completionCards[1].Tag -eq 'preview') 'Preview coexists with a real API notification'
-    $preview=$script:completionCards[1]
-    Check ((@($preview.Controls|Where-Object {$_.Name -eq 'Muted'}).Count -eq 2) -and @($preview.Controls|Where-Object {$_.Text -like '*预览*'}).Count -ge 1) 'Preview labels expose theme role and visible preview wording'
-    Check (@($preview.Controls|Where-Object {$_.Text -eq '关闭提示' -or $_.Text -eq '暂停提醒…'}).Count -eq 0 -and @($preview.Controls|Where-Object {$_.Text -eq '关闭预览'})[0].Width -eq 384) 'Preview has one wide primary action and no redundant secondary actions'
-    @($preview.Controls|Where-Object {$_.Text -eq '关闭预览'})[0].PerformClick()
-    Check ($preview.IsDisposed -and $script:completionCards.Count -eq 1 -and $script:completionHistory.Count -eq $historyCount -and $script:opened.Count -eq 0 -and $script:started.Count -eq 3) 'Preview closes without opening instances, writing history, or launching a worker'
+    Check ($script:completionCards.Count -eq 1 -and $real.IsDisposed -and $script:completionCards[0].Tag -eq 'preview') 'Preview replaces the prior card so only one notice is visible'
+    $preview=$script:completionCards[0]
+    Check ((@($preview.Controls|Where-Object {$_.Name -eq 'Muted'}).Count -eq 1) -and @($preview.Controls|Where-Object {$_.Text -eq '预览'}).Count -eq 1) 'Preview keeps one short status label'
+    Check ($preview.Controls.Count -eq 3 -and $preview.Controls['NoticeBody'] -and $preview.Controls['DismissNotice']) 'Preview exposes only the content surface and close action'
+    $preview.Controls['DismissNotice'].PerformClick()
+    Check ($preview.IsDisposed -and $script:completionCards.Count -eq 0 -and $script:completionHistory.Count -eq $historyCount -and $script:opened.Count -eq 0 -and $script:started.Count -eq 3) 'Preview closes without opening instances, writing history, or launching a worker'
 
     Set-CompletionNotificationsEnabled $true
     $thirdPid=$script:completionWorker.Id

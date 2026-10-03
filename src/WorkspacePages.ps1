@@ -28,7 +28,8 @@ function Initialize-PreferencesPage($Parent) {
 function Initialize-NotificationsPage($Parent) {
     $script:notificationsPage=New-Object Windows.Forms.Panel;$script:notificationsPage.SetBounds(208,18,608,462);$script:notificationsPage.Visible=$false;$Parent.Controls.Add($script:notificationsPage)
     $title=New-UiLabel $script:notificationsPage '通知' 0 0 580 52;$title.Font=New-Object Drawing.Font($Parent.Font.FontFamily,20,[Drawing.FontStyle]::Bold)
-    $note=New-UiLabel $script:notificationsPage '待回答的问题、完成提醒和最近记录，都在这里。' 1 59 580 28;$note.Name='Muted'
+    $windowOptions=New-UiButton $script:notificationsPage '窗口行为' 460 8 126 {Show-WindowBehaviorSettings};$windowOptions.Name='WindowBehaviorSettings'
+    $note=New-UiLabel $script:notificationsPage '仅接收 API 版的问题、完成提醒和最近记录。' 1 59 580 28;$note.Name='Muted'
     $surface=New-Object CodexDual.Surface;$surface.SetBounds(0,102,608,143);$script:notificationsPage.Controls.Add($surface)
     $script:notificationEnabled=New-Object CodexDual.QuietSwitch;$script:notificationEnabled.Text='任务完成时显示提醒';$script:notificationEnabled.SetBounds(20,14,360,32);$surface.Controls.Add($script:notificationEnabled)
     $script:notificationEnabled.Add_Click({param($sender,$e) Invoke-NotificationUiAction @{action='toggle';enabled=$sender.Checked}})
@@ -62,7 +63,7 @@ function Update-NotificationView([switch]$Force) {
     $isPending=$script:notificationListMode -eq 'pending'
     $script:pendingTab.Text='待处理'+$(if(@($pending).Count){' ('+@($pending).Count+')'}else{''});$script:pendingTab.Selected=$isPending;$script:recentTab.Selected=-not $isPending
     $script:questionConnect.Visible=$isPending;$script:questionPreviewButton.Visible=$isPending;$script:clearNotificationHistory.Visible=-not $isPending
-    $entries=@(if($isPending){$pending}else{$script:completionHistory});$pages=[Math]::Max(1,[int][Math]::Ceiling($entries.Count/2.0))
+    $entries=@(if($isPending){$pending}else{Get-ApiCompletionHistory});$pages=[Math]::Max(1,[int][Math]::Ceiling($entries.Count/2.0))
     $script:notificationHistoryPage=[Math]::Max(0,[Math]::Min($script:notificationHistoryPage,$pages-1))
     $script:historyPrevious.Visible=$entries.Count -gt 0;$script:historyNext.Visible=$entries.Count -gt 0;$script:historyPrevious.Enabled=$script:notificationHistoryPage -gt 0;$script:historyNext.Enabled=$script:notificationHistoryPage -lt $pages-1
     $script:historyCounter.Text=if($entries.Count){($script:notificationHistoryPage+1).ToString()+' / '+$pages+' · 共 '+$entries.Count+' 条'}elseif($isPending){if(Get-Variable questionStatus -Scope Script -ErrorAction SilentlyContinue){$script:questionStatus}else{'尚未连接提问服务'}}else{'保留本次运行的最近 20 条完成记录'}
@@ -86,6 +87,36 @@ function Update-NotificationView([switch]$Force) {
         }
     }
     Set-UiTheme $script:notificationsPage
+}
+function Show-WindowBehaviorSettings {
+    $dialog=New-Object CodexDual.ShellForm
+    $dialog.Text='窗口行为';$dialog.ClientSize=New-Object Drawing.Size(500,350)
+    $dialog.FormBorderStyle='FixedDialog';$dialog.MaximizeBox=$false;$dialog.MinimizeBox=$false;$dialog.ShowInTaskbar=$false;$dialog.StartPosition='CenterParent';$dialog.Font=$panel.Font
+    $behavior=Get-WindowBehavior $script:preferences
+    try{
+        [void](New-UiLabel $dialog '打开控制台' 20 18 142 26)
+        $panelMode=New-Object Windows.Forms.ComboBox;$panelMode.Name='PanelFocusMode';$panelMode.DropDownStyle='DropDownList';$panelMode.SetBounds(168,16,304,28)
+        [void]$panelMode.Items.AddRange([object[]]@('显示并聚焦','显示但不抢焦点'));$panelMode.SelectedIndex=@('focus','passive').IndexOf($behavior.panelMode);$dialog.Controls.Add($panelMode)
+        $panelOverlay=New-Object CodexDual.QuietSwitch;$panelOverlay.Name='PanelOverlay';$panelOverlay.Text='控制台保持在普通窗口上方';$panelOverlay.Checked=$behavior.panelOverlay;$panelOverlay.SetBounds(20,56,452,32);$dialog.Controls.Add($panelOverlay)
+        [void](New-UiLabel $dialog '收到 API 问题' 20 110 142 26)
+        $questionMode=New-Object Windows.Forms.ComboBox;$questionMode.Name='QuestionFocusMode';$questionMode.DropDownStyle='DropDownList';$questionMode.SetBounds(168,108,304,28)
+        [void]$questionMode.Items.AddRange([object[]]@('先显示提醒，点击后作答','直接显示小窗，不抢焦点','直接显示小窗并聚焦'));$questionMode.SelectedIndex=@('notice','passive','focus').IndexOf($behavior.questionMode);$dialog.Controls.Add($questionMode)
+        $questionOverlay=New-Object CodexDual.QuietSwitch;$questionOverlay.Name='QuestionOverlay';$questionOverlay.Text='作答小窗保持在普通窗口上方';$questionOverlay.Checked=$behavior.questionOverlay;$questionOverlay.SetBounds(20,150,452,32);$dialog.Controls.Add($questionOverlay)
+        $hint=New-UiLabel $dialog "不抢焦点时继续在原窗口输入，点击小窗后可正常作答。`r`n原生问题是否被接管取决于提问服务；置顶设置本身不会隐藏原生问题。" 20 200 452 62;$hint.Name='Muted'
+        $cancel=New-UiButton $dialog '取消' 246 294 106 {param($sender,$e) $sender.FindForm().DialogResult='Cancel'}
+        $save=New-UiButton $dialog '保存' 366 294 106 {
+            param($sender,$e)
+            $owner=$sender.FindForm()
+            try{
+                $panelMode=@('focus','passive')[$owner.Controls['PanelFocusMode'].SelectedIndex]
+                $questionMode=@('notice','passive','focus')[$owner.Controls['QuestionFocusMode'].SelectedIndex]
+                $script:preferences=Set-WindowBehavior $config $panelMode $owner.Controls['PanelOverlay'].Checked $questionMode $owner.Controls['QuestionOverlay'].Checked
+                $owner.DialogResult='OK';Set-UiMessage '窗口行为已保存，下次显示时生效。'
+            }catch{Show-Error $_}
+        };$save.Name='SaveWindowBehavior';$save.Primary=$true
+        $dialog.AcceptButton=$save;$dialog.CancelButton=$cancel;Set-UiTheme $dialog
+        [void]$dialog.ShowDialog($panel)
+    }finally{$dialog.Dispose()}
 }
 function Show-NotificationDisplaySettings {
     $dialog=New-Object Windows.Forms.Form
@@ -132,7 +163,6 @@ function Invoke-NotificationUiAction([hashtable]$Command) {
             'clear' {$script:completionHistory=@()}
             'preview' {Show-CompletionPreview}
         }
-        if(Get-Variable completionMenu -ErrorAction SilentlyContinue){$completionMenu.Checked=$script:completionSettings.enabled}
         Update-NotificationView -Force
         if((Get-Variable quickPopup -Scope Script -ErrorAction SilentlyContinue) -and $script:quickPopup -and $script:quickPopup.Visible){Set-QuickPopupPage $script:quickPopupPage -Refresh}
     }catch{Set-UiMessage $_.Exception.Message;Update-NotificationView;Show-Error $_}

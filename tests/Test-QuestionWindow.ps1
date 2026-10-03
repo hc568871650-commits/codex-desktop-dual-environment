@@ -52,8 +52,17 @@ try {
     $form.Add_ReturnRequested({$script:returned++})
     $form.SetRequestJson($request)
     $form.Show();Pump
+    Check $form.TopMost 'Question window remains above normal application windows'
     $submit=Find-Control $form 'SubmitAnswer'
     $return=Find-Control $form 'ReturnToCodex'
+    $status=Find-Control $form 'QuestionStatus'
+    $introduction=Find-Control $form 'QuestionIntroduction'
+    $footer=Find-Control $form 'QuestionFooter'
+    Check ((Find-Control $form 'CaptionMuted').Text -eq '回答问题' -and $return.Text -eq '返回 Codex' -and $submit.Text -eq '提交' -and $form.Controls.Find('QuestionHeading',$true).Length -eq 0) 'Caption and actions use compact wording without duplicate headings'
+    Check (-not $introduction.Visible -and -not $status.Visible -and $footer.Height -eq 52 -and (Find-Control $form 'Questions').Height -ge 280) 'Untitled ready request gives unused introduction and status space to questions'
+    $form.SetRequestJson($request.Replace('"isBlocking":true','"isBlocking":true,"taskTitle":"精简通知界面"'));Pump
+    Check ($introduction.Visible -and $introduction.Height -eq 28 -and (Find-Control $form 'QuestionContext').Text -eq '精简通知界面') 'Task title uses one compact line when provided'
+    $form.SetRequestJson($request);Pump
     $screen=[Windows.Forms.Screen]::FromPoint([Windows.Forms.Cursor]::Position).WorkingArea
     Check ($form.ClientSize.Width -eq [Math]::Min(480,$screen.Width) -and $form.ClientSize.Height -eq [Math]::Min(380,$screen.Height) -and -not $form.ShowInTaskbar) 'Default question window is compact and absent from the taskbar'
     Check ($form.Right -le $screen.Right -and $form.Bottom -le $screen.Bottom -and $form.Left -ge $screen.Left -and $form.Top -ge $screen.Top -and $screen.Right-$form.Right -le 20 -and $screen.Bottom-$form.Bottom -le 20) 'Preview appears at the notification corner inside the working area'
@@ -94,7 +103,13 @@ try {
     Check ($script:returned -eq 1 -and $script:submitted -eq 0 -and $form.AnswerJson -eq $null) 'Return action does not answer'
     $form.SetSubmissionState($true,'正在提交回答…')
     Check (-not $submit.Enabled) 'Busy state disables submission'
-    $form.SetSubmissionState($false,'可以提交')
+    $form.Width=320;Pump
+    $form.SetSubmissionState($false,'连接中断，回答尚未提交。请检查当前连接，或返回 Codex 继续回答；现有草稿会保留。');Pump
+    Check ($status.Visible -and $status.Height -gt 24 -and $status.Bottom -lt $return.Top -and $footer.Height -gt 76) 'Long recovery status wraps above the actions in a narrow window'
+    Snapshot $form (Join-Path $directory 'wrapped-status.png')
+    $form.SetSubmissionState($false,'');Pump
+    Check (-not $status.Visible -and $footer.Height -eq 52 -and $submit.Enabled) 'Ready state removes the explanation row and restores question space'
+    $form.PlaceNearNotifications($screen);Pump
     $submit.PerformClick();Pump
     $answer=New-Object System.Web.Script.Serialization.JavaScriptSerializer
     $command=$answer.DeserializeObject($form.AnswerJson)
@@ -110,5 +125,5 @@ try {
     if($form){$form.Dispose()}
     [void][CodexDual.AppTheme]::SetAppearance('dark','neutral')
 }
-if($script:passed -ne 23){throw "Question window checks were skipped: $script:passed"}
+if($script:passed -ne 29){throw "Question window checks were skipped: $script:passed"}
 Write-Output "PASSED: $script:passed question window checks. Screenshots: $directory"

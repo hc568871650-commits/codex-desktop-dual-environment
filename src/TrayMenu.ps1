@@ -11,7 +11,7 @@
     $recent.Add_DropDownOpening({
         param($sender,$e) $recent=$sender
         while($recent.DropDownItems.Count){$recent.DropDownItems[0].Dispose()}
-        foreach($event in $script:completionHistory){
+        foreach($event in @(Get-ApiCompletionHistory)){
             $instance=@($config.instances|Where-Object {$_.id -eq $event.instanceId})
             if($instance.Count -ne 1){continue}
             $title=[string](Get-ObjectValue $event 'title' '任务已完成')
@@ -19,7 +19,7 @@
             $name=(Get-InstanceDisplayName $instance[0] $script:preferences)+' · '+$title
             $item=$recent.DropDownItems.Add($name.Replace('&','&&'));$item.Tag=$event
             $item.Add_Click({param($sender,$e)
-                $event=$sender.Tag;$target=@($config.instances|Where-Object {$_.id -eq $event.instanceId})
+                $event=$sender.Tag;$target=@($config.instances|Where-Object {$_.id -eq $event.instanceId -and $_.role -eq 'api'})
                 if($target.Count -eq 1){$menu.Close();Invoke-PanelAction {Open-CompletionTarget $target[0] $event.threadId}}
             })
         }
@@ -45,23 +45,8 @@
     }
     [void]$menu.Items.Add($directories);[void]$menu.Items.Add($apiMenu)
     $diagnostics=$menu.Items.Add('检查环境');$diagnostics.Add_Click({$menu.Close();Show-ControlPanel;Show-ControllerDiagnostics})
-    $notifications=New-Object Windows.Forms.ToolStripMenuItem('通知');$notifications.DropDown=New-Object CodexDual.QuietMenu
-    $notifications.Enabled=$script:completionReady
-    [void]$notifications.DropDownItems.Add($completionMenu)
-    foreach($minutes in @(15,60)){
-        $pause=$notifications.DropDownItems.Add(('暂停提醒 '+$minutes+' 分钟'));$pause.Tag=$minutes
-        $pause.Add_Click({param($sender,$e) Set-CompletionSnooze ([int]$sender.Tag)})
-    }
-    $resume=$notifications.DropDownItems.Add('恢复提醒');$resume.Add_Click({Set-CompletionSnooze 0})
-    [void]$notifications.DropDownItems.Add((New-Object Windows.Forms.ToolStripSeparator))
-    $dismiss=$notifications.DropDownItems.Add('关闭所有提示');$dismiss.Add_Click({Close-CompletionCards})
-    $notifications.Add_DropDownOpening({
-        param($sender,$e) $notifications=$sender
-        $completionMenu.Checked=$script:completionSettings.enabled
-        $notifications.DropDownItems[1].Enabled=$script:completionSettings.enabled
-        $notifications.DropDownItems[2].Enabled=$script:completionSettings.enabled
-        $notifications.DropDownItems[3].Enabled=Test-CompletionSnoozed
-    })
+    $notifications=New-Object Windows.Forms.ToolStripMenuItem('通知设置')
+    $notifications.Add_Click({$menu.Close();Show-ControlPanel;Show-WorkspacePage 'notifications'})
     [void]$menu.Items.Add($notifications)
     [void]$menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))
     $closeGroup=New-Object Windows.Forms.ToolStripMenuItem('退出环境…');$closeGroup.DropDown=New-Object CodexDual.QuietMenu
@@ -69,7 +54,7 @@
     [void]$menu.Items.Add($closeGroup);[void]$menu.Items.Add($exitItem)
     $menu.Add_Opening({
         foreach($instance in $config.instances){$script:directoryParents[$instance.role].Text=(Get-InstanceDisplayName $instance $script:preferences).Replace('&','&&')}
-        $script:notificationsMenu.Text=if($script:completionReady -and (Test-CompletionSnoozed)){'通知 · 已暂停'}else{'通知'}
+        $script:notificationsMenu.Text='通知设置'
         $script:recentMenu.Enabled=$script:completionReady
     })
     # These handlers outlive this setup function; capture menu objects explicitly.

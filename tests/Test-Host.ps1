@@ -10,6 +10,12 @@ $fixtureExe=Join-Path $root 'Fixture.exe'
 Add-Type -Path "$PSScriptRoot\Fixture.cs" -ReferencedAssemblies System.Windows.Forms,System.Drawing -OutputAssembly $fixtureExe -OutputType WindowsApplication
 & "$PSScriptRoot\..\scripts\Install.ps1" -InstallDirectory $install -DataDirectory $data -OfficialHome $official -OfficialProfile (Join-Path $root 'OfficialProfile') -Executable $fixtureExe -BaseUrl 'https://example.com/v1' -Model 'example-model' -ApiKey $fake -NoShortcuts
 $exe=Join-Path $install 'CodexDualController.exe';$configPath=Join-Path $install 'instances.local.json';$config=Read-ControllerConfig $configPath
+# Seed unrelated preferences in the disposable install so UI policy saves must
+# preserve actual nonempty names and placement, rather than only empty defaults.
+$windowFixturePreferences=Read-ControllerPreferences $config
+$windowFixturePreferences.names['window-settings-fixture']='preserved fixture name'
+$windowFixturePreferences.panel=@{x=50;y=50}
+Save-ControllerPreferences $config $windowFixturePreferences
 # Test only the disposable installed script under a unique mutex. Keep the live
 # controller untouched; Test-Controller separately exercises singleton enforcement.
 $installedController=Join-Path $install 'src\Controller.ps1'
@@ -67,7 +73,7 @@ try{
     Click-Button $element '预览通知'
     Wait-Condition {[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 通知预览') -ne 0} 'notification preview visible'
     $previewHandle=[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 通知预览')
-    Click-Button $previewHandle '关闭预览'
+    Click-Button $previewHandle '×'
     Wait-Condition {[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 通知预览') -eq 0} 'preview dismissed'
     Check $true 'Preview opens and closes without launching either fixture environment'
     Click-Button $element '显示设置'
@@ -79,6 +85,44 @@ try{
     Click-Button $displayDialog '保存'
     Wait-Condition {(Get-Content (Join-Path $install 'state\notifications\settings.local.json') -Raw|ConvertFrom-Json).displaySeconds -eq 5} 'compiled-host duration saved'
     Check ([CodexDualTests.HostAutomation]::FindDialog($process.Id,'通知显示设置') -eq 0 -and [CodexDualTests.HostAutomation]::FindDialog($process.Id,'Microsoft .NET Framework') -eq 0) 'Display settings save resolves controller functions without closure errors'
+    $beforeWindowSettings=Read-ControllerPreferences $config
+    $preservedNames=$beforeWindowSettings.names | ConvertTo-Json -Compress
+    $preservedPlacement=$beforeWindowSettings.panel | ConvertTo-Json -Compress
+    $preservedAppearance=$beforeWindowSettings.appearance | ConvertTo-Json -Compress
+    Click-Button $element '窗口行为'
+    Wait-Condition {[CodexDualTests.HostAutomation]::FindDialog($process.Id,'窗口行为') -ne 0} 'window behavior settings visible'
+    $windowDialog=[CodexDualTests.HostAutomation]::FindDialog($process.Id,'窗口行为')
+    Wait-Condition {@([CodexDualTests.HostAutomation]::Children($windowDialog,'COMBOBOX',$null)).Count -eq 2} 'window behavior controls initialized'
+    $windowModes=@([CodexDualTests.HostAutomation]::Children($windowDialog,'COMBOBOX',$null))
+    Check ($windowModes.Count -eq 2 -and @([CodexDualTests.HostAutomation]::Children($windowDialog,'BUTTON','控制台保持在普通窗口上方')).Count -eq 1 -and @([CodexDualTests.HostAutomation]::Children($windowDialog,'BUTTON','作答小窗保持在普通窗口上方')).Count -eq 1) 'Compiled host exposes independent panel and question focus/overlay controls'
+    [CodexDualTests.HostAutomation]::SelectComboIndex($windowModes[0],1)
+    [CodexDualTests.HostAutomation]::SelectComboIndex($windowModes[1],1)
+    Click-Button $windowDialog '控制台保持在普通窗口上方'
+    # Question overlay defaults to checked and must remain checked when saved.
+    Click-Button $windowDialog '保存'
+    Wait-Condition {
+        $behavior=Get-WindowBehavior (Read-ControllerPreferences $config)
+        return $behavior.panelMode -eq 'passive' -and $behavior.panelOverlay -and $behavior.questionMode -eq 'passive' -and $behavior.questionOverlay
+    } 'compiled-host passive overlay policy saved'
+    $afterWindowSettings=Read-ControllerPreferences $config
+    Check (($afterWindowSettings.names | ConvertTo-Json -Compress) -eq $preservedNames -and ($afterWindowSettings.panel | ConvertTo-Json -Compress) -eq $preservedPlacement -and ($afterWindowSettings.appearance | ConvertTo-Json -Compress) -eq $preservedAppearance -and $afterWindowSettings.names['window-settings-fixture'] -eq 'preserved fixture name') 'Window behavior UI save preserves names, placement and light/blue appearance'
+    Check ([CodexDualTests.HostAutomation]::FindDialog($process.Id,'窗口行为') -eq 0 -and [CodexDualTests.HostAutomation]::FindDialog($process.Id,'Microsoft .NET Framework') -eq 0) 'Window behavior save closes cleanly without controller closure errors'
+    # Restore through the same real controls so subsequent minimize/restore tests
+    # retain their original focused ordinary-panel behavior.
+    Click-Button $element '窗口行为'
+    Wait-Condition {[CodexDualTests.HostAutomation]::FindDialog($process.Id,'窗口行为') -ne 0} 'window behavior settings reopened'
+    $windowDialog=[CodexDualTests.HostAutomation]::FindDialog($process.Id,'窗口行为')
+    Wait-Condition {@([CodexDualTests.HostAutomation]::Children($windowDialog,'COMBOBOX',$null)).Count -eq 2} 'restored window behavior controls initialized'
+    $windowModes=@([CodexDualTests.HostAutomation]::Children($windowDialog,'COMBOBOX',$null))
+    [CodexDualTests.HostAutomation]::SelectComboIndex($windowModes[0],0)
+    [CodexDualTests.HostAutomation]::SelectComboIndex($windowModes[1],0)
+    Click-Button $windowDialog '控制台保持在普通窗口上方'
+    Click-Button $windowDialog '保存'
+    Wait-Condition {
+        $behavior=Get-WindowBehavior (Read-ControllerPreferences $config)
+        return $behavior.panelMode -eq 'focus' -and -not $behavior.panelOverlay -and $behavior.questionMode -eq 'notice' -and $behavior.questionOverlay
+    } 'compiled-host default window policy restored'
+    Check ([CodexDualTests.HostAutomation]::FindDialog($process.Id,'窗口行为') -eq 0) 'Window behavior default policy restores through the real save button'
     Click-Button $element '任务完成时显示提醒'
     Wait-Condition {-not (Get-Content (Join-Path $install 'state\notifications\settings.local.json') -Raw|ConvertFrom-Json).enabled} 'notification disabled from dedicated page'
     Check ([CodexDualTests.HostAutomation]::Responds($main.Handle)) 'Panel remains responsive while stopping notification worker'
@@ -131,12 +175,28 @@ try{
     Check (@(Get-ProcessSnapshot|Where-Object {Test-SamePath $_.Path $fixtureExe}).Count -eq 2) 'Repeat dual open creates no duplicate process'
     Check (@([CodexDualTests.HostAutomation]::Children($element,'BUTTON','常用目录…')).Count -eq 2) 'Each environment exposes its own folder menu'
     Wait-Condition {(Test-Path -LiteralPath $workerStatusPath) -and (Get-Content -LiteralPath $workerStatusPath -Raw|ConvertFrom-Json).state -eq 'running'} 'notification worker ready'
+    $apiFixture=$config.instances[1];$apiProcess=(Get-InstanceStatus $config $apiFixture).Process
+    $apiWindow=@(Get-InstanceWindows $apiFixture $apiProcess|Where-Object {$_.Visible})[0]
+    [void][CodexDual.Native]::FocusVisible($apiWindow.Handle,$apiProcess.Id)
+    Wait-Condition {[CodexDual.Native]::IsInstanceForeground($fixtureExe,$apiFixture.home,$apiFixture.profile)} 'API foreground before completion'
+    $foregroundTurn=[Guid]::NewGuid().ToString()
+    $foregroundComplete=@{type='event_msg';payload=@{type='task_complete';turn_id=$foregroundTurn}}|ConvertTo-Json -Compress
+    [IO.File]::AppendAllText($completionLog,$foregroundComplete+"`n",(New-Object Text.UTF8Encoding($false)))
+    Wait-Condition {
+        $epoch=(Get-Content (Join-Path $install 'state\notifications\settings.local.json') -Raw|ConvertFrom-Json).epoch
+        $checkpoint=Join-Path $install ('state\notifications\monitor-'+$epoch+'.local.json')
+        (Test-Path $checkpoint) -and ([IO.File]::ReadAllText($checkpoint)).Contains($foregroundTurn)
+    } 'foreground completion consumed by worker'
+    Start-Sleep -Milliseconds 1600
+    Check ([CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 任务完成') -eq 0) 'Compiled host suppresses completion while API is foreground'
+    [void][CodexDual.Native]::FocusVisible($main.Handle,$process.Id)
+    Wait-Condition {[CodexDual.Native]::Foreground() -eq $main.Handle} 'controller foreground for background API completion'
     $complete=@{type='event_msg';payload=@{type='task_complete';turn_id=[Guid]::NewGuid().ToString();last_agent_message='DO-NOT-SHOW-PRIVATE-COMPLETION'}}|ConvertTo-Json -Compress
     [IO.File]::AppendAllText($completionLog,$complete+"`n",(New-Object Text.UTF8Encoding($false)))
     Wait-Condition {[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 任务完成') -ne 0} 'completion card from worker'
     $completionHandle=[CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 任务完成')
     Check (-not ([CodexDualTests.HostAutomation]::Describe($process.Id)).Contains('DO-NOT-SHOW-PRIVATE-COMPLETION')) 'Background log event produces correct API card without response body'
-    Click-Button $completionHandle '查看任务'
+    Click-Button $completionHandle '任务已完成'
     Wait-Condition {(Find-Window '选择要显示的窗口').Count -eq 1} 'completion task opens correct fixture environment'
     Click-Button (Find-Window '选择要显示的窗口')[0].Handle '显示选中窗口'
     Wait-Condition {([CodexDualTests.HostAutomation]::Describe($process.Id)).Contains('此程序入口未确认支持任务链接')} 'unsupported fixture reports instance-only fallback'

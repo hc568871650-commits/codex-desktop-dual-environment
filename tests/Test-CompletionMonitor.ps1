@@ -50,13 +50,13 @@ $statePath = Join-Path $root 'state\completion.json'
 $monitor = $null
 try {
     $historicThread = [guid]::NewGuid().ToString()
-    $historic = New-Log $official '2021\07\04' 'historic' (Meta $historicThread)
+    $historic = New-Log $api '2021\07\04' 'historic' (Meta $historicThread)
     Append-Line $historic (Complete ([guid]::NewGuid().ToString()))
     $apiThread = [guid]::NewGuid().ToString()
     $apiLog = New-Log $api '2026\09\23' 'api' (Meta $apiThread)
     Append-Line $apiLog (Complete ([guid]::NewGuid().ToString()))
-    $bad = New-Log $official '2026\09\22' 'bad-meta' (Meta ([guid]::NewGuid().ToString()) 'cli')
-    $missingType = New-Log $official '2026\09\22' 'missing-type' @{ payload=@{
+    $bad = New-Log $api '2026\09\22' 'bad-meta' (Meta ([guid]::NewGuid().ToString()) 'cli')
+    $missingType = New-Log $api '2026\09\22' 'missing-type' @{ payload=@{
         id=[guid]::NewGuid().ToString(); source='vscode'; originator='Codex Desktop'
     } }
     $sub = New-Log $api '2026\09\23' 'subagent' @{ type='session_meta'; payload=@{
@@ -68,24 +68,29 @@ try {
     $outsideRejected = $false
     try { [void](New-CompletionMonitor $config (Join-Path $root 'outside\completion.json')) } catch { $outsideRejected = $true }
     Assert $outsideRejected 'State path outside controller state directory is rejected'
-    Assert ((Poll $monitor).Count -eq 0) 'First enable skips historical completions in both homes'
-    Assert ($monitor.Entries.Count -eq 5) 'Baseline includes old years and both environments'
+    Assert ((Poll $monitor).Count -eq 0) 'First enable skips historical API completions'
+    Assert ($monitor.Entries.Count -eq 5 -and @($monitor.Instances).Count -eq 1 -and $monitor.Instances[0].Id -eq $apiId) 'Baseline includes old API years and only the API instance'
     Assert (@($monitor.Warnings | Where-Object Code -eq 'InvalidMeta').Count -eq 3) 'Untrusted source, missing type, and subagent fail closed'
     Assert (-not ([IO.File]::ReadAllText($statePath)).Contains('PRIVATE_BAIT_NEVER_SAVE')) 'State excludes answer body and bait'
 
-    $officialTurn = [guid]::NewGuid().ToString()
-    Append-Line $historic (Complete $officialTurn)
+    $officialLog = New-Log $official '2026\09\23' 'official' (Meta ([guid]::NewGuid().ToString()))
+    Append-Line $officialLog (Complete ([guid]::NewGuid().ToString()))
+    Assert ((Poll $monitor).Count -eq 0 -and $monitor.Entries.Count -eq 5) 'New official session is never scanned or emitted'
+    Append-Line $officialLog (Complete ([guid]::NewGuid().ToString()))
+    Assert ((Poll $monitor).Count -eq 0 -and $monitor.Entries.Count -eq 5) 'Official session append remains silent'
+    $historicTurn = [guid]::NewGuid().ToString()
+    Append-Line $historic (Complete $historicTurn)
     $events = Poll $monitor
-    Assert ($events.Count -eq 1 -and $events[0].InstanceId -eq $officialId -and
-        $events[0].ThreadId -eq $historicThread -and $events[0].TurnId -eq $officialTurn) 'Old-year official session append retains owner'
+    Assert ($events.Count -eq 1 -and $events[0].InstanceId -eq $apiId -and
+        $events[0].ThreadId -eq $historicThread -and $events[0].TurnId -eq $historicTurn) 'Old-year API session append retains owner'
     Assert (($events[0].PSObject.Properties.Name -join ',') -eq 'InstanceId,ThreadId,TurnId') 'Only completion identifiers leave reader'
     Assert ((Poll $monitor).Count -eq 0) 'Unchanged log does not re-emit'
     Append-Line $historic @{ payload=@{ type='task_complete'; turn_id=[guid]::NewGuid().ToString() } }
     Assert ((Poll $monitor).Count -eq 0) 'Event without a type is ignored under strict mode'
-    Append-Line $historic (Complete $officialTurn)
+    Append-Line $historic (Complete $historicTurn)
     Assert ((Poll $monitor).Count -eq 0) 'Repeated same turn is deduplicated'
-    $duplicateFile = New-Log $official '2026\09\23' 'duplicate-session' (Meta $historicThread)
-    Append-Line $duplicateFile (Complete $officialTurn)
+    $duplicateFile = New-Log $api '2026\09\23' 'duplicate-session' (Meta $historicThread)
+    Append-Line $duplicateFile (Complete $historicTurn)
     Assert ((Poll $monitor).Count -eq 0) 'Same instance, thread, and turn across files is deduplicated'
 
     $apiTurn = [guid]::NewGuid().ToString()
@@ -93,7 +98,7 @@ try {
     $events = Poll $monitor
     Assert ($events.Count -eq 1 -and $events[0].InstanceId -eq $apiId -and $events[0].ThreadId -eq $apiThread) 'API environment remains independently attributed'
     $newThread = [guid]::NewGuid().ToString()
-    $newFile = New-Log $official '2026\09\23' 'new-session' (Meta $newThread)
+    $newFile = New-Log $api '2026\09\23' 'new-session' (Meta $newThread)
     $newTurn = [guid]::NewGuid().ToString()
     Append-Line $newFile (Complete $newTurn)
     Assert ((Poll $monitor)[0].TurnId -eq $newTurn) 'New file after enable reads from its beginning'
@@ -137,6 +142,40 @@ try {
     $monitor = New-CompletionMonitor $config $statePath
     Assert ((Poll $monitor)[0].TurnId -eq $offlineTurn) 'Restart catches up an unread offline completion'
     Assert ((Poll $monitor).Count -eq 0) 'Caught-up event is durable before return'
+
+    Close-CompletionMonitor $monitor
+    $legacyState = [IO.File]::ReadAllText($statePath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    $apiSaved = @($legacyState.files | Where-Object instanceId -eq $apiId)
+    $apiOffset = @($apiSaved | Where-Object path -eq $apiLog)[0].offset
+    $officialCursor = New-CompletionCursor $officialLog $officialId
+    try {
+        [void](Read-NewCompletions $officialCursor)
+        $officialEntry = [pscustomobject]@{path=$officialLog;instanceId=$officialId;fileIdentity=$officialCursor.FileIdentity;offset=$officialCursor.Offset;metaSeen=$officialCursor.MetaSeen;threadId=$officialCursor.ThreadId;seenTurns=@($officialCursor.SeenTurns);status=$officialCursor.Status;idleLength=$officialCursor.Stream.Length;lastWriteTicks=([IO.FileInfo]$officialLog).LastWriteTimeUtc.Ticks}
+    } finally { Close-CompletionCursor $officialCursor }
+    $legacyState.instances = @([pscustomobject]@{id=$officialId;home=$official},[pscustomobject]@{id=$apiId;home=$api})
+    $legacyState.files = @($apiSaved) + @($officialEntry)
+    [IO.File]::WriteAllText($statePath, ($legacyState | ConvertTo-Json -Depth 12), [Text.Encoding]::UTF8)
+    $migrationTurn = [guid]::NewGuid().ToString()
+    Append-Line $apiLog (Complete $offlineTurn)
+    Append-Line $apiLog (Complete $migrationTurn)
+    Append-Line $officialLog (Complete ([guid]::NewGuid().ToString()))
+    $monitor = New-CompletionMonitor $config $statePath
+    Assert (@($monitor.Entries.Values | Where-Object InstanceId -eq $officialId).Count -eq 0) 'Legacy dual-home state discards official cursors'
+    Assert ($monitor.Entries[(Get-MonitorKey $apiId $apiLog)].Offset -eq $apiOffset) 'Legacy migration preserves API full-line offset'
+    $events = Poll $monitor
+    Assert ($events.Count -eq 1 -and $events[0].TurnId -eq $migrationTurn -and $events[0].InstanceId -eq $apiId) 'Legacy migration retains deduplication and catches unread API completion only'
+    $migrated = [IO.File]::ReadAllText($statePath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert ($migrated.schema -eq 1 -and @($migrated.instances).Count -eq 1 -and $migrated.instances[0].id -eq $apiId -and @($migrated.files | Where-Object instanceId -eq $officialId).Count -eq 0) 'Migrated schema1 state persists API ownership only'
+    Close-CompletionMonitor $monitor
+    $monitor = New-CompletionMonitor $config $statePath
+    Assert ((Poll $monitor).Count -eq 0) 'Migrated single-API state restarts without replay'
+
+    $invalidLegacyPath = Join-Path $config.stateDirectory 'wrong-legacy-binding.json'
+    $legacyState.instances[0].home = Join-Path $root 'unrelated-official'
+    [IO.File]::WriteAllText($invalidLegacyPath, ($legacyState | ConvertTo-Json -Depth 12), [Text.Encoding]::UTF8)
+    $legacyRejected = $false
+    try { [void](New-CompletionMonitor $config $invalidLegacyPath) } catch { $legacyRejected = $true }
+    Assert $legacyRejected 'Legacy migration validates official binding before filtering it'
 
     $healthyTurn = [guid]::NewGuid().ToString()
     Append-Line $bad (Complete ([guid]::NewGuid().ToString()))

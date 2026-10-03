@@ -8,7 +8,7 @@ $checks=@(
     @{file='Test-Install.ps1';args=@()},@{file='Test-Upgrade.ps1';args=@()},@{file='Test-Setup.ps1';args=@()},
     @{file='Test-Experience.ps1';args=@()},@{file='Test-DailyActions.ps1';args=@()},@{file='Test-Diagnostics.ps1';args=@()},@{file='Test-ExitUi.ps1';args=@()},
     @{file='Test-CompletionMonitor.ps1';args=@()},@{file='Test-CompletionNotifications.ps1';args=@()},@{file='Test-NotificationToggle.ps1';args=@()},@{file='Test-Appearance.ps1';args=@()},
-    @{file='Test-QuestionWindow.ps1';args=@()},@{file='Test-NotificationReturn.ps1';args=@()},@{file='Test-NoticeDeadline.ps1';args=@()},@{file='Test-NotificationShape.ps1';args=@()},@{file='Test-Responsiveness.ps1';args=@()},
+    @{file='Test-WindowBehavior.ps1';args=@()},@{file='Test-LiveQuestionBinding.ps1';args=@()},@{file='Test-QuestionWindow.ps1';args=@()},@{file='Test-NotificationReturn.ps1';args=@()},@{file='Test-NoticeDeadline.ps1';args=@()},@{file='Test-NotificationShape.ps1';args=@()},@{file='Test-Responsiveness.ps1';args=@()},
     @{file='Test-FastRestore.ps1';args=@()},@{file='Test-HiddenActivation.ps1';args=@()},@{file='Test-TrayClick.ps1';args=@()},@{file='Test-TrayPopup.ps1';args=@()},@{file='Test-QuickPopup.ps1';args=@()},@{file='Test-QuickMenu.ps1';args=@()},@{file='Test-CompletionNavigation.ps1';args=@()},
     @{file='Test-Controller.ps1';args=@()},@{file='Test-Host.ps1';args=@()}
 )

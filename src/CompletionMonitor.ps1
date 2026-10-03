@@ -146,7 +146,7 @@ function New-CompletionMonitor($Config, [string]$StatePath) {
     }
     $monitor = [pscustomobject]@{
         StatePath = $path; StateDirectory = [IO.Path]::GetFullPath([string]$Config.stateDirectory)
-        Instances = $instances; Entries = @{}; NextScanUtc = [DateTime]::MinValue
+        Instances = @($instances | Where-Object {$_.Role -eq 'api'}); Entries = @{}; NextScanUtc = [DateTime]::MinValue
         Warnings = (New-Object 'System.Collections.Generic.List[object]')
         WarningKeys = (New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))
         Delivered = (New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))
@@ -154,8 +154,10 @@ function New-CompletionMonitor($Config, [string]$StatePath) {
     }
     if ([IO.File]::Exists($path)) {
         $saved = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json -ErrorAction Stop
-        if ($saved.schema -ne 1 -or @($saved.instances).Count -ne 2) { throw 'Invalid monitor state.' }
-        foreach ($instance in $instances) {
+        if ($saved.schema -ne 1 -or @($saved.instances).Count -notin @(1,2)) { throw 'Invalid monitor state.' }
+        # Accept the old dual-home checkpoint only after checking both identities.
+        $expected=if(@($saved.instances).Count -eq 2){$instances}else{$monitor.Instances}
+        foreach ($instance in $expected) {
             $match = @($saved.instances | Where-Object { $_.id -eq $instance.Id -and $_.home -eq $instance.Home })
             if ($match.Count -ne 1) { throw 'Monitor state belongs to another environment.' }
         }
@@ -166,6 +168,7 @@ function New-CompletionMonitor($Config, [string]$StatePath) {
                 (Join-Path $owner[0].Home 'sessions').TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
                 throw 'Invalid monitor file ownership.'
             }
+            if ($owner[0].Role -ne 'api') { continue }
             $entry = [pscustomobject]@{
                 Path = [string]$file.path; InstanceId = [string]$file.instanceId; FileIdentity = [string]$file.fileIdentity
                 Offset = [long]$file.offset; MetaSeen = [bool]$file.metaSeen; ThreadId = $file.threadId
@@ -191,6 +194,8 @@ function New-CompletionMonitor($Config, [string]$StatePath) {
         }
         Save-CompletionMonitor $monitor
     }
+    # Persist the API-only checkpoint without resetting offsets or replaying API history.
+    Save-CompletionMonitor $monitor
     $monitor.NextScanUtc = [DateTime]::UtcNow.Add($script:CompletionScanInterval)
     return $monitor
 }

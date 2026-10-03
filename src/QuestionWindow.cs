@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -13,31 +13,31 @@ namespace CodexDual {
   [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr handle,int message,IntPtr wParam,IntPtr lParam);
   readonly JavaScriptSerializer json=new JavaScriptSerializer { MaxJsonLength=4*1024*1024,RecursionLimit=100 };
   readonly Panel caption=new Panel { Name="QuestionCaption",Dock=DockStyle.Top,Height=38 };
-  readonly Panel introduction=new Panel { Name="QuestionIntroduction",Dock=DockStyle.Top,Height=67 };
+  readonly Panel introduction=new Panel { Name="QuestionIntroduction",Dock=DockStyle.Top,Height=28 };
   readonly Panel list=new Panel { Name="Questions",Dock=DockStyle.Fill,AutoScroll=true };
-  readonly Panel footer=new Panel { Name="QuestionFooter",Dock=DockStyle.Bottom,Height=75 };
+  readonly Panel footer=new Panel { Name="QuestionFooter",Dock=DockStyle.Bottom,Height=52 };
   readonly Label context=new Label { Name="QuestionContext",AutoEllipsis=true };
-  readonly Label heading=new Label { Name="QuestionHeading",Text="等待回答",AutoSize=false };
-  readonly Label subtitle=new Label { Name="Muted",Text="请完成每一项，再提交回答。",AutoSize=false };
   readonly Label status=new Label { Name="QuestionStatus",AutoSize=false };
-  readonly QuietButton submit=new QuietButton { Name="SubmitAnswer",Text="提交回答",Primary=true,Size=new Size(106,32) };
-  readonly QuietButton returnButton=new QuietButton { Name="ReturnToCodex",Text="返回 Codex 作答",Size=new Size(146,32) };
+  readonly QuietButton submit=new QuietButton { Name="SubmitAnswer",Text="提交",Primary=true,Size=new Size(86,32) };
+  readonly QuietButton returnButton=new QuietButton { Name="ReturnToCodex",Text="返回 Codex",Size=new Size(114,32) };
   readonly List<QuestionEditor> editors=new List<QuestionEditor>();
   readonly Dictionary<string,Dictionary<string,EditorDraft>> drafts=new Dictionary<string,Dictionary<string,EditorDraft>>(StringComparer.Ordinal);
   Dictionary<string,object> request;
   string token="";
   bool valid,busy,resizeLayout,placed;
   public string RequestToken { get { return token; } }
+  public string RequestConnectionId { get { return request==null?"":FieldText(request,"connectionId"); } }
+  public bool IsRequestValid { get { return valid; } }
   public string AnswerJson { get; private set; }
   public event EventHandler SubmitRequested;
   public event EventHandler ReturnRequested;
 
   public QuestionWindow() {
-   Name="QuestionWindow";Text="Codex 提问";ClientSize=new Size(480,380);MinimumSize=new Size(320,280);
+   Name="QuestionWindow";Text="回答问题";ClientSize=new Size(480,380);MinimumSize=new Size(320,280);
    Font=new Font("Microsoft YaHei UI",9f);StartPosition=FormStartPosition.Manual;
-   FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;KeyPreview=true;
+   FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;KeyPreview=true;TopMost=true;ShowWithoutFocus=true;
    caption.MouseDown+=DragCaption;
-   var captionText=new Label { Name="CaptionMuted",Text="CODEX  /  待回答的问题",AutoSize=false,TextAlign=ContentAlignment.MiddleLeft,Font=new Font(Font.FontFamily,9f,FontStyle.Bold) };
+   var captionText=new Label { Name="CaptionMuted",Text="回答问题",AutoSize=false,TextAlign=ContentAlignment.MiddleLeft,Font=new Font(Font.FontFamily,9f,FontStyle.Bold) };
    captionText.SetBounds(16,3,420,30);captionText.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;captionText.MouseDown+=DragCaption;
    var close=new QuietButton { Name="CloseQuestionWindow",Text="×",Quiet=true,Size=new Size(30,28),Anchor=AnchorStyles.Top|AnchorStyles.Right,AccessibleName="关闭问题窗口" };
    close.Location=new Point(ClientSize.Width-38,5);close.Click+=delegate { Close(); };
@@ -45,17 +45,14 @@ namespace CodexDual {
    caption.Controls.Add(captionText);caption.Controls.Add(close);
    context.SetBounds(16,4,ClientSize.Width-32,18);context.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;
    context.Font=new Font(Font.FontFamily,8f,FontStyle.Bold);
-   heading.SetBounds(16,22,ClientSize.Width-32,24);heading.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;
-   heading.Font=new Font(Font.FontFamily,12f,FontStyle.Bold);
-   subtitle.SetBounds(16,47,ClientSize.Width-32,18);subtitle.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;
-   introduction.Controls.Add(context);introduction.Controls.Add(heading);introduction.Controls.Add(subtitle);
+   introduction.Controls.Add(context);introduction.Visible=false;
    status.SetBounds(16,3,ClientSize.Width-32,23);status.Anchor=AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Top;
    returnButton.Location=new Point(16,32);returnButton.Anchor=AnchorStyles.Left|AnchorStyles.Bottom;
    submit.Location=new Point(ClientSize.Width-122,32);submit.Anchor=AnchorStyles.Right|AnchorStyles.Bottom;
    returnButton.Click+=delegate { if(ReturnRequested!=null)ReturnRequested(this,EventArgs.Empty); };
    submit.Click+=delegate { Submit(); };
    footer.Controls.Add(status);footer.Controls.Add(returnButton);footer.Controls.Add(submit);
-   footer.Resize+=delegate { status.Width=Math.Max(100,footer.ClientSize.Width-32);submit.Left=footer.ClientSize.Width-submit.Width-16; };
+   footer.Resize+=delegate { ArrangeFooter(); };
    Controls.Add(list);Controls.Add(footer);Controls.Add(introduction);Controls.Add(caption);
    list.Resize+=delegate { ArrangeEditors(); };
    list.HandleCreated+=delegate { SetWindowTheme(list.Handle,AppTheme.IsDark?"DarkMode_Explorer":"Explorer",null); };
@@ -63,9 +60,8 @@ namespace CodexDual {
    KeyDown+=delegate(object sender,KeyEventArgs e) { if(e.KeyCode==Keys.Escape){Close();e.Handled=true;} };
    close.Left=caption.ClientSize.Width-close.Width-8;
    submit.Left=footer.ClientSize.Width-submit.Width-16;
-   ApplyAppearance();UpdateSubmit();
+   ArrangeFooter();ApplyAppearance();UpdateSubmit();
   }
-  protected override bool ShowWithoutActivation { get { return true; } }
   protected override void OnLoad(EventArgs e) {
    if(!placed)PlaceNearNotifications(Screen.FromPoint(Cursor.Position).WorkingArea);
    base.OnLoad(e);
@@ -120,10 +116,9 @@ namespace CodexDual {
     Dictionary<string,EditorDraft> saved;EditorDraft draft;
     if(drafts.TryGetValue(token,out saved)&&saved.TryGetValue(editor.Id,out draft))editor.Restore(draft);
    }
-   string taskTitle=FieldText(incoming,"taskTitle");context.Text=(String.IsNullOrWhiteSpace(taskTitle)?"API 任务":taskTitle)+" · "+questions.Length+" 项待回答";
-   heading.Text="Codex 需要你的回答";
-   subtitle.Text=Flag(incoming,"isBlocking")?"当前任务正在等待这些答案。":"任务仍可继续运行，你可以在这里补充答案。";
-   status.Text="请选择或填写每一项答案。";
+   string taskTitle=FieldText(incoming,"taskTitle");context.Text=taskTitle;
+   introduction.Visible=!String.IsNullOrWhiteSpace(taskTitle);
+   SetStatus("");
    ArrangeEditors();ApplyAppearance();UpdateSubmit();
   }
   void SaveDraft() {
@@ -134,13 +129,12 @@ namespace CodexDual {
   }
   public void SetSubmissionState(bool submitting,string message) {
    busy=submitting;
-   if(!String.IsNullOrWhiteSpace(message))status.Text=message;
-   else status.Text=submitting?"正在提交回答…":valid?"请选择或填写每一项答案。":"该问题已失效。";
+   SetStatus(!String.IsNullOrWhiteSpace(message)?message:submitting?"正在提交…":valid?"":"该问题已失效。");
    UpdateSubmit();
   }
   public void InvalidateRequest(string reason) {
    valid=false;busy=false;AnswerJson=null;
-   status.Text=String.IsNullOrWhiteSpace(reason)?"该问题已失效，请返回 Codex 查看。":reason;
+   SetStatus(String.IsNullOrWhiteSpace(reason)?"该问题已失效，请返回 Codex 查看。":reason);
    UpdateSubmit();
   }
   void UpdateSubmit() {
@@ -151,13 +145,25 @@ namespace CodexDual {
   }
   void Submit() {
    if(!valid||busy||request==null)return;
-   UpdateSubmit();if(!submit.Enabled){status.Text="请为每一项选择或填写答案。";return;}
+   UpdateSubmit();if(!submit.Enabled){SetStatus("请为每一项选择或填写答案。");return;}
    var answers=new Dictionary<string,object>(StringComparer.Ordinal);
    foreach(var editor in editors)answers[editor.Id]=new { answers=new[]{editor.Answer} };
    object id;request.TryGetValue("requestId",out id);
    AnswerJson=json.Serialize(new { command="answer",connectionId=FieldText(request,"connectionId"),requestToken=token,requestId=id,threadId=FieldText(request,"threadId"),turnId=FieldText(request,"turnId"),answers=answers });
-   busy=true;status.Text="正在提交回答…";UpdateSubmit();
+   busy=true;SetStatus("正在提交…");UpdateSubmit();
    if(SubmitRequested!=null)SubmitRequested(this,EventArgs.Empty);
+  }
+  void SetStatus(string message) {
+   status.Text=message;ArrangeFooter();
+  }
+  void ArrangeFooter() {
+   int width=Math.Max(100,footer.ClientSize.Width-32);
+   bool hasStatus=!String.IsNullOrWhiteSpace(status.Text);
+   int height=hasStatus?TextRenderer.MeasureText(status.Text,Font,new Size(width,10000),TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix).Height+4:0;
+   footer.Height=52+(hasStatus?height+8:0);
+   status.Visible=hasStatus;status.SetBounds(16,6,width,height);
+   returnButton.Location=new Point(16,footer.Height-42);
+   submit.Location=new Point(footer.ClientSize.Width-submit.Width-16,footer.Height-42);
   }
   void ArrangeEditors() {
    if(resizeLayout||list.ClientSize.Width<100)return;
@@ -184,8 +190,7 @@ namespace CodexDual {
    if(list.IsHandleCreated)SetWindowTheme(list.Handle,AppTheme.IsDark?"DarkMode_Explorer":"Explorer",null);
    BackColor=AppTheme.Background;caption.BackColor=AppTheme.Background;introduction.BackColor=AppTheme.Background;
    list.BackColor=AppTheme.Background;footer.BackColor=AppTheme.Background;
-   context.ForeColor=AppTheme.AccentColor;heading.ForeColor=AppTheme.Text;
-   subtitle.ForeColor=AppTheme.Muted;status.ForeColor=valid?AppTheme.Muted:AppTheme.AccentColor;
+   context.ForeColor=AppTheme.AccentColor;status.ForeColor=valid?AppTheme.Muted:AppTheme.AccentColor;
    foreach(var editor in editors)editor.ApplyAppearance();
    Invalidate(true);
   }

@@ -3,6 +3,23 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 namespace CodexDual {
+ // One accessible click surface shared by completion, question and feedback cards.
+ // The close control is a sibling, so closing never bubbles into opening a task.
+ public sealed class NoticeBody : Button {
+  public NoticeBody() {
+   Name="NoticeBody";FlatStyle=FlatStyle.Flat;FlatAppearance.BorderSize=0;
+   SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw,true);
+   UseVisualStyleBackColor=false;Cursor=Cursors.Hand;TextAlign=ContentAlignment.TopLeft;
+  }
+  protected override void OnPaint(PaintEventArgs e) {
+   Color background=Parent==null?BackColor:Parent.BackColor;var ink=ForeColor;
+   e.Graphics.Clear(background);
+   int top=12;
+   using(var title=new Font(Font.FontFamily,Font.Size+2.5f,FontStyle.Bold))
+    TextRenderer.DrawText(e.Graphics,Text,title,new Rectangle(12,top,Math.Max(1,Width-24),Math.Max(1,Height-top-10)),ink,TextFormatFlags.Left|TextFormatFlags.Top|TextFormatFlags.WordBreak|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);
+   if(Focused&&ShowFocusCues)ControlPaint.DrawFocusRectangle(e.Graphics,new Rectangle(3,3,Width-7,Height-7),ink,background);
+  }
+ }
  public sealed class CompletionCard : Form {
   readonly Timer lifetime = new Timer { Interval=250 };
   readonly Timer fade = new Timer { Interval=30 };

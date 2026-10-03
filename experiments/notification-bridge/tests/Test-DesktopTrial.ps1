@@ -2,6 +2,14 @@ param([Parameter(Mandatory=$true)][string]$TrialDirectory)
 $ErrorActionPreference='Stop'
 . (Join-Path (Split-Path $PSScriptRoot -Parent) 'Trial.Common.ps1')
 $m=Read-BridgeTrial $TrialDirectory
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class TrialPipeIdentity {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern bool GetNamedPipeServerProcessId(IntPtr pipe, out uint pid);
+}
+'@
 $passed=0;$evidence=@()
 function Check($condition,[string]$name){if(-not $condition){throw ('FAIL: '+$name)};$script:passed++;Write-Output ('PASS: '+$name)}
 function VerifiedRoot {
@@ -54,10 +62,33 @@ try{
         $writer.WriteLine('{"command":"snapshot"}');$read=$reader.ReadLineAsync();if(-not $read.Wait(3000)){throw 'Trial desktop pipe timeout'}
         $snapshot=$read.Result|ConvertFrom-Json
         Check ($snapshot.ok -and $snapshot.instanceId -eq $cfg.instanceId) 'Actual desktop launched the bound bridge pipe'
+        [uint32]$pipeServerId=0
+        if(-not [TrialPipeIdentity]::GetNamedPipeServerProcessId($pipe.SafePipeHandle.DangerousGetHandle(),[ref]$pipeServerId)){throw 'Cannot verify the pipe server process'}
     }finally{$pipe.Dispose()}
     $tree=@(Descendants $rootProcess.Id)
-    $proxy=@($tree|Where-Object {$_.ExecutablePath -eq (Join-Path $m.root 'BridgeProxy.exe')})
-    Check ($proxy.Count -eq 1 -and $proxy[0].ParentProcessId -eq $rootProcess.Id) 'Exactly one proxy belongs to the isolated desktop'
+    # Desktop also invokes the configured CLI for short-lived version/probe calls.
+    # Bind ownership to the kernel-reported pipe server, not every transient proxy.
+    $proxy=@($tree|Where-Object {$_.ProcessId -eq $pipeServerId -and $_.ExecutablePath -eq (Join-Path $m.root 'BridgeProxy.exe')})
+    # Startup can replace the first app-server. Re-handshake rather than accepting
+    # an old pipe PID or weakening the verified desktop ancestry requirement.
+    $identityDeadline=[DateTime]::UtcNow.AddSeconds(12)
+    while($proxy.Count -ne 1 -and [DateTime]::UtcNow -lt $identityDeadline){
+        Start-Sleep -Milliseconds 250
+        $retryPipe=New-Object IO.Pipes.NamedPipeClientStream('.',$cfg.pipeName,[IO.Pipes.PipeDirection]::InOut)
+        try{
+            $retryPipe.Connect(2000)
+            $retryWriter=New-Object IO.StreamWriter($retryPipe);$retryWriter.AutoFlush=$true
+            $retryReader=New-Object IO.StreamReader($retryPipe);$retryWriter.WriteLine('{"command":"snapshot"}')
+            $retryRead=$retryReader.ReadLineAsync();if(-not $retryRead.Wait(2000)){throw 'Retry handshake timed out'}
+            $retrySnapshot=$retryRead.Result|ConvertFrom-Json
+            if(-not $retrySnapshot.ok -or $retrySnapshot.instanceId -ne $cfg.instanceId){throw 'Retry handshake identity differs'}
+            if(-not [TrialPipeIdentity]::GetNamedPipeServerProcessId($retryPipe.SafePipeHandle.DangerousGetHandle(),[ref]$pipeServerId)){throw 'Cannot verify replacement pipe process'}
+        }finally{$retryPipe.Dispose()}
+        $tree=@(Descendants $rootProcess.Id)
+        $proxy=@($tree|Where-Object {$_.ProcessId -eq $pipeServerId -and $_.ExecutablePath -eq (Join-Path $m.root 'BridgeProxy.exe')})
+    }
+    Write-TrialJson (Join-Path $m.root 'desktop-identity-probe.json') @{desktopPid=$rootProcess.Id;pipeServerPid=$pipeServerId;descendants=@($tree|Where-Object {$_.Name -in @('BridgeProxy.exe','codex.exe')}|Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine)}
+    Check ($proxy.Count -eq 1 -and $proxy[0].ParentProcessId -eq $rootProcess.Id -and $proxy[0].CommandLine -match '(?:^|\s)app-server(?:\s|$)') 'Pipe-owning app-server proxy belongs to the isolated desktop'
     Check (@($tree|Where-Object {$_.ParentProcessId -eq $proxy[0].ProcessId -and $_.ExecutablePath -eq $m.realCli}).Count -eq 1) 'Proxy owns the expected bundled real CLI child'
     $evidence+=@{phase='bridge';desktopPid=$rootProcess.Id;proxyPid=$proxy[0].ProcessId;pipeMatched=$true}
     & (Join-Path $m.root 'Rollback-ApiBridge.ps1')|Out-Null

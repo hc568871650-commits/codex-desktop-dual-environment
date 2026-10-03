@@ -130,6 +130,27 @@ namespace CodexDual {
    try {using(var process=Process.GetProcessById(pid)){return MatchesKnownProcess(process,pid,started,path,command,home,profile);}}
    catch(ArgumentException){return false;}catch(InvalidOperationException){return false;}catch(System.ComponentModel.Win32Exception){return false;}catch(NotSupportedException){return false;}
   }
+  // Notification attention check. Inspect only the foreground owner, never activate it.
+  // Both routing paths and the executable must match; the official instance shares
+  // the same image and window title, so neither alone establishes API ownership.
+  public static bool IsInstanceForeground(string path,string home,string profile) {
+   try {
+    if(string.IsNullOrEmpty(path)||string.IsNullOrEmpty(home)||string.IsNullOrEmpty(profile))return false;
+    IntPtr window=GetForegroundWindow();int pid;
+    if(window==IntPtr.Zero||!IsWindowVisible(window)||IsIconic(window))return false;
+    GetWindowThreadProcessId(window,out pid);
+    using(var process=Process.GetProcessById(pid)) {
+     if(!SameRoutingPath(process.MainModule.FileName,path))return false;
+     string command=ReadCommandLine(pid);
+     if(!MatchesKnownProcess(process,pid,process.StartTime.ToUniversalTime().Ticks,path,command,home,profile))return false;
+     foreach(var candidate in Windows(pid)) {
+      if(candidate.Handle==window.ToInt64()&&candidate.Visible)
+       return !process.HasExited&&GetForegroundWindow()==window&&!IsIconic(window);
+     }
+    }
+   }catch(ArgumentException){}catch(InvalidOperationException){}catch(System.ComponentModel.Win32Exception){}catch(NotSupportedException){}catch(System.IO.IOException){}
+   return false;
+  }
   public static string FocusKnownVisible(int pid,long started,string path,string command,string home,string profile) {
    try {
     using(var process=Process.GetProcessById(pid)) {

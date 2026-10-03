@@ -207,13 +207,8 @@ try {
         $panel.Add_FormClosing({param($sender,$e)Save-PanelPosition;if(-not $script:quittingController -and $e.CloseReason -eq 'UserClosing'){$e.Cancel=$true;$panel.Hide()}})
         $openPanelItem=New-Object Windows.Forms.ToolStripMenuItem('打开控制面板');$openPanelItem.Add_Click({$menu.Close();Show-ControlPanel});$menu.Items.Insert(1,$openPanelItem)
         $apiMenu=New-Object Windows.Forms.ToolStripMenuItem('管理 API');$apiMenu.Add_Click({$menu.Close();Show-ControlPanel;if(-not $script:openBusy){Show-ApiManager}});$menu.Items.Insert(2,$apiMenu)
-        $completionMenu=New-Object Windows.Forms.ToolStripMenuItem('独立任务完成提示');$completionMenu.CheckOnClick=$true;$menu.Items.Insert(3,$completionMenu)
-        try{Initialize-CompletionNotifications;$script:completionReady=$true;$completionMenu.Checked=$script:completionSettings.enabled}
-        catch{$completionMenu.Enabled=$false;Set-UiMessage '独立通知未能启动，请检查通知设置；其他控制功能可继续使用。'}
-        $completionMenu.Add_Click({
-            try{Set-CompletionNotificationsEnabled $completionMenu.Checked;Set-UiMessage $(if($completionMenu.Checked){'独立任务完成提示已开启。'}else{'独立任务完成提示已暂停。'})}
-            catch{$completionMenu.Checked=$script:completionSettings.enabled;Show-Error $_}
-        })
+        try{Initialize-CompletionNotifications;$script:completionReady=$true}
+        catch{Set-UiMessage '通知未能启动，请在控制台检查设置。'}
         $notificationEnabled.Enabled=$script:completionReady;if($script:completionReady){$notificationEnabled.Checked=$script:completionSettings.enabled}
         Initialize-PendingQuestions
         $pendingMenu=New-Object Windows.Forms.ToolStripMenuItem('待处理问题');$pendingMenu.Add_Click({$menu.Close();$script:notificationListMode='pending';Show-ControlPanel;Show-WorkspacePage 'notifications'});$menu.Items.Insert(4,$pendingMenu)
