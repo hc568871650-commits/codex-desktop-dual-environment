@@ -1,6 +1,6 @@
-# 从旧版升级到 0.8.9 候选版
+# 从旧版升级到 0.8.9
 
-0.8.9 正在准备发布，前一个公开版本为 v0.8.8；本次标准范围为退出交互、组件诊断和问答保护。实验扩展不随标准包安装。公开下载状态见 [Releases](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases)，本次边界见 [版本说明](VERSION-0.8.9-CANDIDATE.md)。
+0.8.9 的前一个公开版本为 v0.8.8；本次标准范围为退出交互、组件诊断和问答保护。实验扩展不随标准包安装。公开下载状态见 [Releases](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases)，本次边界见 [版本说明](VERSION-0.8.9.md)。
 
 无需重新输入密钥，也不搬动原来的 Codex 数据。升级只在工具目录内进行。0.2 及以后的版本保留现有 instances.local.json；仅迁移 0.1 时默认读取 `%LOCALAPPDATA%\CodexDualLauncher\settings.json`，这是 0.1 启动器的设置位置。
 
