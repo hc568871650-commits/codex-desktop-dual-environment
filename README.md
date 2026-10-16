@@ -6,7 +6,7 @@
 
 [公开版下载](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/latest) · [快速开始](#快速开始) · [升级指南](docs/UPGRADE.md) · [0.8.8 发布说明](docs/RELEASE-0.8.8.md) · [验证记录](docs/VALIDATION.md)
 
-> **当前版本：v0.8.8。** 本次从公开版 v0.8.3 累计更新，包含 0.8.4–0.8.8 的变化；0.8.4–0.8.7 为本机迭代，未单独公开发布。附件、校验清单与最终发布状态见 [v0.8.8 Release](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/tag/v0.8.8)。
+> **当前源码：0.8.9 本地候选版，尚未公开发布。** 标准范围包括一次确认退出、重复打开修复、六项只读组件诊断、安全登记刷新和隐藏草稿保护。自动适配、原生标题建议与守护兼容补丁均为独立源码实验，不包含在标准 ZIP 内，组合体验尚待验收。见 [候选版说明](docs/VERSION-0.8.9-CANDIDATE.md)。公开稳定版仍为 [v0.8.8](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/tag/v0.8.8)。
 
 ![0.8.8 双环境控制面板](docs/images/0.8.8/overview-dark.png)
 
@@ -60,7 +60,7 @@ API 主窗口在前台时，自动完成提示保持静默，最近完成记录�
 
 作答窗支持多题滚动、选项、自由输入和敏感内容遮罩；默认约 480 × 380，可调整大小。关闭窗口不会替你回答或取消问题。预览没有真实提交，所以会保留“答案未发送”的反馈。
 
-**交付边界：**标准 ZIP 包含问题界面、待处理视图和连接客户端，但不包含 `experiments/notification-bridge` 的代理程序、机器绑定或生产安装流程。普通用户可在“通知 → 待处理 → 预览提问”查看界面；维护者可从[桥接实验说明（需检出源码）](https://github.com/hc568871650-commits/codex-desktop-dual-environment/tree/v0.8.8/experiments/notification-bridge)建立独立试验环境。已配置的桥接在身份、程序版本或绑定校验失败时回退原生入口。审批和未知交互继续由 Codex 处理。
+**交付边界：**标准 ZIP 包含问题界面、待处理视图和连接客户端，但排除整个 `experiments` 目录，不含代理程序、自适配、标题建议、守护补丁或机器绑定。实验依赖和安装限制见[自适配源码说明](https://github.com/hc568871650-commits/codex-desktop-dual-environment/tree/main/experiments/adaptive-bridge)与[标题源码说明](https://github.com/hc568871650-commits/codex-desktop-dual-environment/tree/main/experiments/title-suggestions/native)。普通用户可在“通知 → 待处理 → 预览提问”查看界面；维护者可从[桥接实验说明（需检出源码）](https://github.com/hc568871650-commits/codex-desktop-dual-environment/tree/v0.8.8/experiments/notification-bridge)建立独立试验环境。已配置的桥接在身份、程序版本或绑定校验失败时回退原生入口。审批和未知交互继续由 Codex 处理。
 
 ## 快速开始
 
@@ -107,11 +107,13 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts\Bootstrap.p
 
 ## 实例识别与已知边界
 
-控制器结合完整 EXE 路径、Desktop profile、只读 `CODEX_HOME`、PID 和创建时间确认实例。归属不明时停止操作；不按 `ChatGPT.exe` 或 `codex.exe` 名称批量结束进程。正常退出后仍驻留时，强制结束需要单独确认；不能确认归属的外部任务进程会保留并报告。
+控制器结合完整 EXE 路径、Desktop profile、只读 `CODEX_HOME`、PID 和创建时间确认实例。归属不明时停止操作；不按 `ChatGPT.exe` 或 `codex.exe` 名称批量结束进程。点击“退出…”并明确确认一次后，直接结束已核验的目标实例；取消则保留。确认框提示任务中断和未保存内容丢失风险，结果在面板内反馈。当前宿主及不能确认归属的外部任务进程受保护，不按名称批量结束。
 
 Windows 可能拒绝后台抢占前台，控制器会提示实际结果。进程“已运行”不表示任务空闲，也不保证任务已结束。不同 Codex 版本、多窗口导航、历史恢复和全部原生通知类型仍有待覆盖，不能把局部测试视为完全兼容。
 
-0.8.8 发布候选在 Windows PowerShell 5.1 下通过 **29 套控制器回归及 7 套桥接 fixture 检查**，覆盖同步/异步回答、前后台切换和多连接路由；此前的 116 项专项证据继续保留。后台真实日常模型问答、所有窗口/通知组合、精确聊天导航与历史恢复尚未全面验收，实验桥接仍不作为标准包能力交付。最终 CI、附件与验证范围见 [Release](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/tag/v0.8.8) 和[验证记录](docs/VALIDATION.md)。
+0.8.9 本轮本地完整回归已通过 **32 套检查**；自适配和标题实验分项测试与真实组合体验分开记录，详见[验证记录](docs/VALIDATION.md)。最终包和远端发布验证不由源码回归替代。
+
+历史 0.8.8 发布候选在 Windows PowerShell 5.1 下通过 **29 套控制器回归及 7 套桥接 fixture 检查**，覆盖同步/异步回答、前后台切换和多连接路由；此前的 116 项专项证据继续保留。后台真实日常模型问答、所有窗口/通知组合、精确聊天导航与历史恢复尚未全面验收，实验桥接仍不作为标准包能力交付。最终 CI、附件与验证范围见 [Release](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/tag/v0.8.8) 和[验证记录](docs/VALIDATION.md)。
 
 ## 开发与版本记录
 
@@ -125,6 +127,7 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts\Export-Docu
 
 | 版本 | 主要变化 |
 |---|---|
+| [0.8.9 候选](docs/VERSION-0.8.9-CANDIDATE.md) | 一次确认退出、组件健康诊断、安全登记刷新与隐藏草稿保护 |
 | [0.8.8](docs/VERSION-0.8.8.md) | 成功回答及时收起、延迟确认恢复、连接确认与旧回执隔离 |
 | [0.8.7](docs/VERSION-0.8.7.md) | 通知卡片和作答窗精简，通知控制集中 |
 | [0.8.6](docs/VERSION-0.8.6.md) | API 前台原生提问、后台独立作答、切换时防重复 |

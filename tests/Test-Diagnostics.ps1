@@ -23,6 +23,12 @@ try {
     function Get-ApiManagementMode([string]$Root){'builtin'}
     $report=Get-ControllerDiagnostics $config $tool
     Check ($report.Schema -eq 1 -and $report.Version -eq '0.4.0' -and $report.Runtime.OS -eq 'Windows') 'Version and runtime are structured'
+    Check ($report.Components.Count -eq 6) 'Component health is included without starting services'
+    [IO.File]::WriteAllText((Join-Path $tool 'version.json'),'{"product":"codex-desktop-dual-environment","version":"0.4.0","buildRevision":"candidate-20261016-health-title"}')
+    $build=Get-ControllerDiagnostics $config $tool
+    Check ($build.BuildRevision -eq 'candidate-20261016-health-title' -and (ConvertTo-ControllerDiagnosticText $build).Contains('candidate-20261016-health-title')) 'Candidate revision is shown while numeric version stays compatible'
+    $build.BuildRevision=$secret
+    Check (-not (ConvertTo-ControllerDiagnosticText $build).Contains($secret)) 'Invalid revision is omitted from rendered diagnostics'
     Check ($report.Instances.Count -eq 2 -and $report.Instances[0].Role -eq 'official' -and $report.Instances[1].Role -eq 'api') 'Only fixed roles are reported'
     Check ($report.Instances[0].State -eq 'Running' -and $report.Instances[1].State -eq 'Stopped') 'Statuses are restricted to fixed states'
     Check ($report.Instances[1].CredentialEntryPresent -and $report.Instances[1].ManagementMode -eq 'builtin') 'Credential entry existence is boolean'

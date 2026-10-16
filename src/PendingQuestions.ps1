@@ -6,6 +6,7 @@ $script:questionPreview=$null
 $script:questionReturnTarget=$null
 $script:questionStatus='尚未连接提问服务';$script:questionPollAt=[DateTime]::MinValue;$script:questionSeen=New-Object 'Collections.Generic.HashSet[string]'
 $script:questionNativeForeground=$false
+$script:questionRegistrationPollAt=[DateTime]::MinValue
 function Read-QuestionBridgeBinding([string]$Directory) {
     $root=Get-FullDirectory $Directory;Assert-NoReparsePoint $root
     if(Test-Path -LiteralPath (Join-Path $root 'binding.json')){
@@ -42,6 +43,31 @@ function Initialize-PendingQuestions {
         catch{$script:questionStatus='提问连接不可用，请重新连接；可在 Codex 中作答。'}
     }
 }
+function Update-QuestionBridgeRegistration {
+    if([DateTime]::UtcNow -lt $script:questionRegistrationPollAt){return}
+    $script:questionRegistrationPollAt=[DateTime]::UtcNow.AddSeconds(5)
+    # Never discard an answer result, ownership, or an unsaved question draft.
+    if(@($script:questionPending).Count -or $script:questionReturnTarget){return}
+    if($script:questionClient -and ($script:questionClient.Busy -or $script:questionClient.HasPendingResults)){return}
+    if($script:questionWindow -and -not $script:questionWindow.IsDisposed -and ($script:questionWindow.Visible -or $script:questionWindow.HasUnresolvedDraft)){return}
+    try {
+        $path=Join-Path $config.stateDirectory 'question-bridge.local.json';Assert-NoReparsePoint $path
+        if(-not(Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -gt 8192){return}
+        $saved=[IO.File]::ReadAllText($path)|ConvertFrom-Json
+        $api=@($config.instances|Where-Object {$_.role -eq 'api'})
+        if($saved.schema -ne 1 -or $api.Count -ne 1 -or $saved.instanceId -cne $api[0].id){return}
+        if($script:questionBinding -and (Test-SamePath $saved.directory $script:questionBinding.directory)){return}
+        # An old live proxy may still own requests not yet present in our last
+        # snapshot. Only hand over after that process has gone away.
+        if($script:questionBinding -and @((Get-ProcessSnapshot)|Where-Object {Test-SamePath $_.Path $script:questionBinding.proxy}).Count){return}
+        $candidate=Read-QuestionBridgeBinding $saved.directory
+        if($candidate.instance.id -cne $saved.instanceId -or (Test-Path -LiteralPath $candidate.disabled)){return}
+        Connect-QuestionBridge $saved.directory
+    }catch{
+        # A missing/partial/untrusted replacement leaves the existing connection
+        # untouched. The next bounded poll can retry an atomic valid replacement.
+    }
+}
 function Select-QuestionBridge {
     $dialog=New-Object Windows.Forms.FolderBrowserDialog;$dialog.Description='选择此 API 环境已经验证的提问服务目录'
     try{if($dialog.ShowDialog() -eq 'OK'){Connect-QuestionBridge $dialog.SelectedPath -Persist;Update-NotificationView -Force}}catch{Show-Error $_}finally{$dialog.Dispose()}
@@ -68,8 +94,7 @@ function Clear-PendingQuestionState([string]$Reason) {
 function Close-ResolvedQuestion([string]$Token) {
     # A late reply must never dismiss a newer question the user is editing.
     if($script:questionWindow -and -not $script:questionWindow.IsDisposed -and $script:questionWindow.RequestToken -ceq $Token){
-        $script:questionWindow.InvalidateRequest('问题已处理。')
-        $script:questionWindow.Hide()
+        $script:questionWindow.ResolveRequest()
     }
     if($script:questionNotice -and -not $script:questionNotice.IsDisposed -and [string]$script:questionNotice.Tag -ceq $Token){$script:questionNotice.Close()}
 }
@@ -140,6 +165,7 @@ function Show-QuestionNotice($Request) {
     $card.Location=New-Object Drawing.Point(($area.Right-$card.Width-20),($area.Bottom-$card.Height-20));$card.Show();Update-CompletionCardLayout
 }
 function Update-PendingQuestions {
+    Update-QuestionBridgeRegistration
     if(-not $script:questionClient){return}
     if(-not $script:questionBinding -or -not (Get-ApiFeatureInstance $config $script:questionBinding.instance.id)){Clear-PendingQuestionState '无法确认 API 实例归属，请在 Codex 中作答。';return}
     if(Test-Path -LiteralPath $script:questionBinding.disabled){Clear-PendingQuestionState '提问服务已停用，请在 Codex 中作答。';return}

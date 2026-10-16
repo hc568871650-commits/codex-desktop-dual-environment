@@ -26,6 +26,16 @@ function Test-ConfigReject([string]$Field,$Value){Reset-Fixture;$script:bridgeCo
 try {
     Reset-Fixture;$valid=Read-TestBridge
     Assert-Test ($null -ne $valid -and $valid.proxy -eq $proxy -and $valid.config.instanceId -eq ('api-live-'+$identity)) 'valid production helper binding'
+    $reason=Get-ApiQuestionBridgeValidation -Directory $bridge -ApiHome $apiFixtureHome -Profile $profile -DesktopExecutable $desktop -InstanceId $controllerId
+    Assert-Test ($reason.valid -and $reason.reasonCode -eq 'VALIDATED_NOT_CONNECTED') 'valid binding does not claim a live connection'
+    [IO.File]::Delete($cli)
+    $reason=Get-ApiQuestionBridgeValidation -Directory $bridge -ApiHome $apiFixtureHome -Profile $profile -DesktopExecutable $desktop -InstanceId $controllerId
+    Assert-Test (-not $reason.valid -and $reason.reasonCode -eq 'CLI_MISSING' -and $null -eq $reason.binding) 'missing old CLI has an explicit safe reason'
+    [IO.File]::WriteAllText($cli,('FAKE TEST FILE '+$cli))
+    [IO.File]::Delete($desktop)
+    $reason=Get-ApiQuestionBridgeValidation -Directory $bridge -ApiHome $apiFixtureHome -Profile $profile -DesktopExecutable $desktop -InstanceId $controllerId
+    Assert-Test (-not $reason.valid -and $reason.reasonCode -eq 'DESKTOP_MISSING') 'missing old Desktop has an explicit safe reason'
+    [IO.File]::WriteAllText($desktop,('FAKE TEST FILE '+$desktop))
     foreach($case in @(@('schema',2),@('kind','isolated-api-bridge-trial'),@('id','invalid'),@('root',$fixture),@('apiHome',$profile),@('profile',$apiFixtureHome),@('controllerInstanceId','wrong'),@('desktopExe',$cli),@('userSid','S-1-0-0'),@('realCliHash','00'),@('desktopHash','00'),@('proxyHash','00'),@('configHash','00'))){Test-ManifestReject $case[0] $case[1]}
     foreach($case in @(@('apiHome',$profile),@('realCli',$desktop),@('instanceId','wrong'),@('pipeName','wrong'),@('takeoverQuestions',$false),@('takeoverQuestions','true'))){Test-ConfigReject $case[0] $case[1]}
     Reset-Fixture;[IO.File]::WriteAllText($bridgeConfigPath,'{}');Assert-Test ($null -eq (Read-TestBridge)) 'reject changed config bytes'

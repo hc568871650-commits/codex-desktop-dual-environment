@@ -24,7 +24,8 @@ namespace CodexDual {
   readonly Dictionary<string,Dictionary<string,EditorDraft>> drafts=new Dictionary<string,Dictionary<string,EditorDraft>>(StringComparer.Ordinal);
   Dictionary<string,object> request;
   string token="";
-  bool valid,busy,resizeLayout,placed;
+  bool valid,busy,resizeLayout,placed,resolved;
+  public bool HasUnresolvedDraft { get { return !resolved&&!String.IsNullOrEmpty(token); } }
   public string RequestToken { get { return token; } }
   public string RequestConnectionId { get { return request==null?"":FieldText(request,"connectionId"); } }
   public bool IsRequestValid { get { return valid; } }
@@ -107,7 +108,7 @@ namespace CodexDual {
    if(String.IsNullOrWhiteSpace(nextToken)||Array(incoming,"questions").Length==0)throw new ArgumentException("Request needs a token and questions.","value");
    SaveDraft();
    if(token!=nextToken)drafts.Clear();
-   token=nextToken;request=incoming;valid=true;busy=false;AnswerJson=null;
+   token=nextToken;request=incoming;valid=true;busy=false;resolved=false;AnswerJson=null;
    foreach(var editor in editors)editor.Dispose();editors.Clear();list.Controls.Clear();
    var questions=Array(incoming,"questions");
    for(int i=0;i<questions.Length;i++) {
@@ -136,6 +137,9 @@ namespace CodexDual {
    valid=false;busy=false;AnswerJson=null;
    SetStatus(String.IsNullOrWhiteSpace(reason)?"该问题已失效，请返回 Codex 查看。":reason);
    UpdateSubmit();
+  }
+  public void ResolveRequest() {
+   InvalidateRequest("问题已处理。");resolved=true;drafts.Clear();Hide();
   }
   void UpdateSubmit() {
    if(IsDisposed)return;

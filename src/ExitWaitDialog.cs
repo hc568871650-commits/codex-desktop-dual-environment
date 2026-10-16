@@ -11,6 +11,21 @@ namespace CodexDual {
  }
 
  public static class ExitWaitDialog {
+  // Pump the existing panel without creating a modal progress window.
+  public static ExitWaitResult WaitInline(Process process, int timeoutMilliseconds) {
+   if(process==null)throw new ArgumentNullException("process");
+   if(timeoutMilliseconds<1)throw new ArgumentOutOfRangeException("timeoutMilliseconds");
+   var result=new ExitWaitResult();
+   var watch=Stopwatch.StartNew();
+   while(true) {
+    if(process.HasExited) { result.Exited=true;break; }
+    if(watch.ElapsedMilliseconds>=timeoutMilliseconds)break;
+    Application.DoEvents();result.PumpCount++;
+    System.Threading.Thread.Sleep(20);
+   }
+   watch.Stop();result.ElapsedMilliseconds=watch.ElapsedMilliseconds;
+   return result;
+  }
   public static ExitWaitResult Show(Process process, string title, string message, int timeoutMilliseconds, IWin32Window owner) {
    if(process==null)throw new ArgumentNullException("process");
    if(timeoutMilliseconds<1)throw new ArgumentOutOfRangeException("timeoutMilliseconds");

@@ -121,9 +121,12 @@ try {
     Check (-not $submit.Enabled) 'Connection recovery cannot reactivate an invalid request'
     $form.Close();Pump
     Check (-not $form.Visible -and -not $form.IsDisposed -and $script:submitted -eq 1) 'Closing hides without producing an answer'
+    Check ($form.HasUnresolvedDraft) 'Hidden disconnected question retains unresolved draft ownership'
+    $form.ResolveRequest();Pump
+    Check (-not $form.HasUnresolvedDraft -and -not $form.Visible -and -not $form.IsRequestValid) 'Confirmed resolution permits safe binding replacement'
 } finally {
     if($form){$form.Dispose()}
     [void][CodexDual.AppTheme]::SetAppearance('dark','neutral')
 }
-if($script:passed -ne 29){throw "Question window checks were skipped: $script:passed"}
+if($script:passed -ne 31){throw "Question window checks were skipped: $script:passed"}
 Write-Output "PASSED: $script:passed question window checks. Screenshots: $directory"

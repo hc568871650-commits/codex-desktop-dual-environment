@@ -27,3 +27,13 @@ backups/
 .env
 .env.*
 upgrades/
+
+# Local evidence, compiled experiments and per-machine integration
+artifacts/
+__pycache__/
+*.pyc
+experiments/**/bin/
+experiments/**/binding.json
+experiments/**/integration.json
+experiments/**/guard-runtime-binding.json
+experiments/**/*.sidecar.json

@@ -55,26 +55,6 @@ try {
         }
         return 'Shown'
     }
-    function Close-Instance($instance) {
-        Invoke-InstanceLocked $instance {
-            $status=Get-InstanceStatus $config $instance;if($status.State -eq 'Stopped'){return}
-            $process=$status.Process;Assert-NotCurrentHost $process
-            $label=Get-InstanceDisplayName $instance (Read-ControllerPreferences $config)
-            $answer=[Windows.Forms.MessageBox]::Show("退出$label？无法可靠查询任务状态。请先在该实例中确认没有正在执行的任务；关闭窗口也可能仅隐藏到原生托盘。",'确认退出','YesNo','Warning','Button2')
-            if($answer -ne 'Yes'){return}
-            $before=Get-ProcessSnapshot;$owned=@(Get-OwnedDesktopChildren $process $before)
-            Request-InstanceClose $instance $process
-            $alive=-not (Wait-ExpectedProcessExitUi -Expected $process -Message ('正在退出 '+$label+'…') -TimeoutMilliseconds 3000)
-            if($alive) {
-                $answer=[Windows.Forms.MessageBox]::Show("$label 仍在后台运行。是否强制结束已核验的桌面进程？可能中断任务和丢失未保存内容。不会结束任务启动的服务器、编辑器或无法确认归属的进程。",'正常退出未完成','YesNo','Warning','Button2')
-                if($answer -eq 'Yes'){$owned=@(Stop-InstanceForced $instance $process -UserConfirmed);[void](Wait-ExpectedProcessExitUi -Expected $process -Message ('正在强制结束 '+$label+'…') -TimeoutMilliseconds 2000)}
-            }
-            $residual=@(Get-ExitResiduals $before $owned)
-            if($residual.Count){$text=($residual | ForEach-Object {"PID $($_.Id) / $($_.Name) / "+$(if($_.VerifiedDesktop){'桌面进程仍驻留'}else{'归属/用途未充分确认，保留'})}) -join "`r`n"}
-            else{$text='已核验的进程已退出。未观察到原进程树残留；这不代表所有外部应用都已关闭。'}
-            [void][Windows.Forms.MessageBox]::Show($text,'退出结果')
-        }
-    }
     if($Action -in @('official','api')) {$outcome=Open-Instance @($config.instances | Where-Object {$_.role -eq $Action})[0];if($outcome -eq 'Running'){[void][Windows.Forms.MessageBox]::Show('目标窗口已恢复，但 Windows 拒绝抢占前台。请点击其任务栏窗口。','Codex 双环境')};return}
     $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $hashAlgorithm=[Security.Cryptography.SHA256]::Create()
@@ -83,6 +63,9 @@ try {
     $tray=$null;$menu=$null;$trayClick=$null;$script:quickPopup=$null
     $script:statusWork=$null;$script:openWork=$null
     $panel=$null;$panelEvent=$null;$configureEvent=$null;$panelTimer=$null;$script:quittingController=$false;$script:completionReady=$false
+    # The duplicate-instance branch exits before any panel is constructed.
+    # Cleanup must not replace that result with a StrictMode undefined-variable error.
+    $script:exitDetails=$null
     $mutexName='Local\CodexDual.Controller.'+$sid
     if($SmokeTest){$mutexName+='.Smoke.'+$configHash}
     $mutex=New-Object Threading.Mutex($false,$mutexName);$held=$false
@@ -173,6 +156,7 @@ try {
         Initialize-PreferencesPage $panel;Initialize-NotificationsPage $panel
         $settingsPage=$script:settingsPage;$settingsHeading=$script:settingsHeading
         $script:feedback=New-UiLabel $panel '托盘：单击打开 API 版，双击打开工作台。' 210 501 600 38;$script:feedback.ForeColor=[CodexDual.AppTheme]::Muted;$script:feedback.Font=New-Object Drawing.Font($panel.Font.FontFamily,8.5)
+        $script:exitDetails=New-Object Windows.Forms.ToolTip
         function Show-WorkspacePage([ValidateSet('overview','notifications','settings')][string]$Name){
             $settingsPage.Visible=$Name -eq 'settings';$overviewPage.Visible=$Name -eq 'overview';$script:notificationsPage.Visible=$Name -eq 'notifications'
             $overviewNav.Selected=$overviewPage.Visible;$settingsNav.Selected=$settingsPage.Visible;$notificationNav.Selected=$script:notificationsPage.Visible
@@ -268,5 +252,5 @@ try {
             $script:quickPopup.Hide()
             }
         }else{if($Action -in @('panel','configure')){Show-ControlPanel};if($LifecycleObserver){$LifecycleObserver.Invoke('ready-'+$Action)};if($Action -eq 'configure'){Show-ApiManager};[Windows.Forms.Application]::Run($context)}
-    }finally{Dispose-PendingQuestions;if($script:quickPopup){$script:quickPopup.Dispose()};if($menu){$menu.Dispose()};if($trayClick){$trayClick.Dispose()};if($panelTimer){$panelTimer.Stop();$panelTimer.Dispose()};if($script:statusWork){$script:statusWork.Dispose()};if($script:openWork){$script:openWork.Dispose()};if($script:completionReady){Dispose-CompletionNotifications};if($panelEvent){$panelEvent.Dispose()};if($configureEvent){$configureEvent.Dispose()};if($panel){$panel.Dispose()};if($tray){$tray.Visible=$false;$tray.Dispose()};if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
+    }finally{if($script:exitDetails){$script:exitDetails.Dispose()};Dispose-PendingQuestions;if($script:quickPopup){$script:quickPopup.Dispose()};if($menu){$menu.Dispose()};if($trayClick){$trayClick.Dispose()};if($panelTimer){$panelTimer.Stop();$panelTimer.Dispose()};if($script:statusWork){$script:statusWork.Dispose()};if($script:openWork){$script:openWork.Dispose()};if($script:completionReady){Dispose-CompletionNotifications};if($panelEvent){$panelEvent.Dispose()};if($configureEvent){$configureEvent.Dispose()};if($panel){$panel.Dispose()};if($tray){$tray.Visible=$false;$tray.Dispose()};if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
 }catch{if($LifecycleObserver){$LifecycleObserver.Invoke('failed-'+$_.Exception.GetType().FullName)};if($Action -eq 'status' -or $SmokeTest){throw};Show-Error $_;exit 1}

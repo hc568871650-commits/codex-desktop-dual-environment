@@ -1,4 +1,5 @@
-﻿$ErrorActionPreference='Stop'
+﻿param([switch]$ExitOnly)
+$ErrorActionPreference='Stop'
 . "$PSScriptRoot\..\src\Instances.ps1"
 Add-Type -Path "$PSScriptRoot\HostAutomation.cs"
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -55,6 +56,12 @@ try{
     Wait-Condition {try{$event=[Threading.EventWaitHandle]::OpenExisting($eventName);$event.Dispose();return $true}catch{return $false}} 'background host initialized'
     Wait-Condition {(Get-Content (Join-Path $install 'state\controller-startup.log') -Raw).Contains('ready-tray')} 'background readiness logged'
     Check (@([CodexDual.Native]::Windows($process.Id)|Where-Object {$_.Visible}).Count -eq 0) 'Compiled EXE background mode has no visible panel'
+    if($ExitOnly){
+        $event=[Threading.EventWaitHandle]::OpenExisting($eventName)
+        try{[void]$event.Set()}finally{$event.Dispose()}
+        Wait-Condition {(Find-Window $panelPattern).Count -eq 1} 'main panel visible for exit checks'
+        $main=(Find-Window $panelPattern)[0]
+    }else{
     $second=Start-TestHost ('--config "'+$configPath+'"')
     try{Check ($second.WaitForExit(12000) -and $second.ExitCode -eq 0) 'Second EXE launch forwards to existing controller'}finally{$second.Dispose()}
     Wait-Condition {(Find-Window $panelPattern).Count -eq 1} 'main panel visible'
@@ -179,6 +186,7 @@ try{
     $apiWindow=@(Get-InstanceWindows $apiFixture $apiProcess|Where-Object {$_.Visible})[0]
     [void][CodexDual.Native]::FocusVisible($apiWindow.Handle,$apiProcess.Id)
     Wait-Condition {[CodexDual.Native]::IsInstanceForeground($fixtureExe,$apiFixture.home,$apiFixture.profile)} 'API foreground before completion'
+    $foregroundEvidence=@(@{stage='before-event';handle=[CodexDual.Native]::Foreground();apiForeground=$true;utc=[DateTime]::UtcNow.ToString('o')})
     $foregroundTurn=[Guid]::NewGuid().ToString()
     $foregroundComplete=@{type='event_msg';payload=@{type='task_complete';turn_id=$foregroundTurn}}|ConvertTo-Json -Compress
     [IO.File]::AppendAllText($completionLog,$foregroundComplete+"`n",(New-Object Text.UTF8Encoding($false)))
@@ -187,7 +195,10 @@ try{
         $checkpoint=Join-Path $install ('state\notifications\monitor-'+$epoch+'.local.json')
         (Test-Path $checkpoint) -and ([IO.File]::ReadAllText($checkpoint)).Contains($foregroundTurn)
     } 'foreground completion consumed by worker'
+    $foregroundEvidence+=@{stage='worker-consumed';handle=[CodexDual.Native]::Foreground();apiForeground=[CodexDual.Native]::IsInstanceForeground($fixtureExe,$apiFixture.home,$apiFixture.profile);utc=[DateTime]::UtcNow.ToString('o')}
     Start-Sleep -Milliseconds 1600
+    $foregroundEvidence+=@{stage='assert';handle=[CodexDual.Native]::Foreground();apiForeground=[CodexDual.Native]::IsInstanceForeground($fixtureExe,$apiFixture.home,$apiFixture.profile);utc=[DateTime]::UtcNow.ToString('o')}
+    Write-AtomicText (Join-Path $root 'foreground-evidence.json') ($foregroundEvidence|ConvertTo-Json -Depth 4)
     Check ([CodexDualTests.HostAutomation]::FindDialog($process.Id,'API 环境 · 任务完成') -eq 0) 'Compiled host suppresses completion while API is foreground'
     [void][CodexDual.Native]::FocusVisible($main.Handle,$process.Id)
     Wait-Condition {[CodexDual.Native]::Foreground() -eq $main.Handle} 'controller foreground for background API completion'
@@ -254,45 +265,54 @@ try{
     try{Check ($again.WaitForExit(12000) -and $again.ExitCode -eq 0) 'Restore request exits after forwarding'}finally{if(-not $again.HasExited){$again.Kill();$again.WaitForExit()};$again.Dispose()}
     Wait-Condition {(Find-Window $panelPattern).Count -eq 1} 'panel restored'
     Check (@(Get-ProcessSnapshot|Where-Object {Test-SamePath $_.Path $exe}).Count -eq 1) 'Repeated taskbar-style launch keeps one compiled host'
+    }
     # Exercise real instance exit buttons against disposable GUI processes only.
     $officialFixture=$config.instances[0]
     Write-AtomicText (Join-Path $officialFixture.profile 'stubborn.fixture') ''
     $stubborn=Start-OrFindInstance $config $officialFixture;$fixtureProcesses+=$stubborn
     $other=Start-OrFindInstance $config $config.instances[1];$fixtureProcesses+=$other
-    foreach($forceAnswer in @(7,6)){
-        Click-Button $main.Handle '退出…'
-        Wait-Condition {([CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出')) -ne 0} 'exit confirmation'
-        [CodexDualTests.HostAutomation]::Answer([CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出'),6)
-        $exitWatch=[Diagnostics.Stopwatch]::StartNew()
-        Wait-Condition {(Find-Window '正在退出').Count -eq 1} 'progress window'
-        $progressWindow=(Find-Window '正在退出')[0]
-        Check ([CodexDualTests.HostAutomation]::Responds($progressWindow.Handle)) 'Progress window responds during graceful exit wait'
-        Wait-Condition {([CodexDualTests.HostAutomation]::FindDialog($process.Id,'正常退出未完成')) -ne 0} 'force confirmation'
-        $exitWatch.Stop()
-        Check ($exitWatch.ElapsedMilliseconds -lt 7000) 'Close-to-tray reaches confirmation without the old ten-second freeze'
-        [CodexDualTests.HostAutomation]::Answer([CodexDualTests.HostAutomation]::FindDialog($process.Id,'正常退出未完成'),$forceAnswer)
-        Wait-Condition {([CodexDualTests.HostAutomation]::FindDialog($process.Id,'退出结果')) -ne 0} 'exit results'
-        Check ((Test-ExpectedProcessAlive $stubborn) -eq ($forceAnswer -eq 7)) 'Force decline preserves the fixture; approval ends it'
-        Check (Test-ExpectedProcessAlive $other) 'Other environment survives the full exit flow'
-        [CodexDualTests.HostAutomation]::Answer([CodexDualTests.HostAutomation]::FindDialog($process.Id,'退出结果'),1)
-        Wait-Condition {([CodexDualTests.HostAutomation]::FindDialog($process.Id,'退出结果')) -eq 0} 'result dismissed'
-        Start-Sleep -Milliseconds 600
-    }
-    # A normal close must return successfully even if the first window ends the process.
+    Click-Button $main.Handle '退出…'
+    Wait-Condition {([CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出')) -ne 0} 'exit confirmation'
+    [CodexDualTests.HostAutomation]::Answer([CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出'),7)
+    Wait-Condition {([CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出')) -eq 0} 'exit cancellation'
+    Check (Test-ExpectedProcessAlive $stubborn) 'First confirmation cancellation preserves the stubborn fixture'
+    Check (Test-ExpectedProcessAlive $other) 'Other environment survives exit cancellation'
+    Check (@([CodexDualTests.HostAutomation]::Children($main.Handle,'BUTTON','强制结束…')).Count -eq 0) 'Cancellation never exposes a force button'
+    Click-Button $main.Handle '退出…'
+    Wait-Condition {([CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出')) -ne 0} 'single direct-exit confirmation'
+    $exitWatch=[Diagnostics.Stopwatch]::StartNew()
+    [CodexDualTests.HostAutomation]::Answer([CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出'),6)
+    Wait-Condition {-not (Test-ExpectedProcessAlive $stubborn)} 'first approval directly ends stubborn fixture'
+    Check ($exitWatch.ElapsedMilliseconds -lt 3000) 'First approval ends stubborn fixture without a three-second graceful wait'
+    Wait-Condition {[CodexDualTests.HostAutomation]::Responds($main.Handle)} 'direct-exit panel responsive'
+    Check (Test-ExpectedProcessAlive $other) 'Other environment survives confirmed direct exit'
+    Check ((Find-Window '正在退出').Count -eq 0) 'Direct exit has no modal progress window'
+    Check (([CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出')) -eq 0) 'Direct exit requires no second confirmation'
+    Check (@([CodexDualTests.HostAutomation]::Children($main.Handle,'BUTTON','强制结束…')).Count -eq 0) 'Direct exit exposes no force button'
+    Check (([CodexDualTests.HostAutomation]::FindDialog($process.Id,'退出结果')) -eq 0) 'Direct exit has no result dismissal'
+    Start-Sleep -Milliseconds 600
+    Click-Button $main.Handle '退出…'
+    Start-Sleep -Milliseconds 400
+    Check (([CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出')) -eq 0 -and -not (Test-ExpectedProcessAlive $stubborn)) 'Already stopped exit causes no confirmation or restart'
+    Check (Test-ExpectedProcessAlive $other) 'Already stopped exit preserves the other environment'
+    # The other multi-window environment uses the same single-confirmation path.
     $buttons=@([CodexDualTests.HostAutomation]::Children($main.Handle,'BUTTON','退出…'))
     [CodexDualTests.HostAutomation]::Click($buttons[1])
     Wait-Condition {([CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出')) -ne 0} 'API exit confirmation'
     [CodexDualTests.HostAutomation]::Answer([CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出'),6)
-    Wait-Condition {([CodexDualTests.HostAutomation]::FindDialog($process.Id,'退出结果')) -ne 0} 'normal exit result'
-    Check (-not (Test-ExpectedProcessAlive $other)) 'Normal multi-window exit completes without a force prompt'
-    [CodexDualTests.HostAutomation]::Answer([CodexDualTests.HostAutomation]::FindDialog($process.Id,'退出结果'),1)
+    Wait-Condition {-not (Test-ExpectedProcessAlive $other)} 'API direct exit completes'
+    Check (-not (Test-ExpectedProcessAlive $other) -and [CodexDualTests.HostAutomation]::FindDialog($process.Id,'确认退出') -eq 0) 'Multi-window API exit completes with a single confirmation'
+    Check (([CodexDualTests.HostAutomation]::FindDialog($process.Id,'退出结果')) -eq 0) 'API direct exit has no result dialog'
     Start-Sleep -Milliseconds 600
     $element=Get-Element (Find-Window $panelPattern)[0].Handle
     Click-Button $element '退出工具'
     Check ($process.WaitForExit(12000)) 'Exit button ends only test controller'
     Check ((Get-Content -LiteralPath $workerStatusPath -Raw|ConvertFrom-Json).state -eq 'stopped') 'Controller exit stops its notification worker cleanly'
     $after=Get-ProcessSnapshot
-    Check (@($original|Where-Object {$saved=$_;@($after|Where-Object {Test-ProcessIdentity $saved $_}).Count -ne 1}).Count -eq 0) 'Original Codex processes retained throughout EXE UI test'
+    $changedOriginal=@($original|Where-Object {$saved=$_;@($after|Where-Object {Test-ProcessIdentity $saved $_}).Count -ne 1})
+    Write-AtomicText (Join-Path $root 'process-preservation.json') (@{before=$original;after=@($after|Where-Object {$_.Name -in @('ChatGPT.exe','Codex.exe')});changed=$changedOriginal}|ConvertTo-Json -Depth 6)
+    if($changedOriginal.Count){Write-Output ($changedOriginal|Select-Object Id,ParentId,Name,Path,Command|ConvertTo-Json -Depth 3)}
+    Check ($changedOriginal.Count -eq 0) 'Original Codex processes retained throughout EXE UI test'
 }catch{if($process -and -not $process.HasExited){Write-Output ([CodexDualTests.HostAutomation]::Describe($process.Id))};throw}
 finally{if($process){if(-not $process.HasExited){$process.Kill();$process.WaitForExit()};$process.Dispose()};foreach($fixture in @(Get-ProcessSnapshot|Where-Object {Test-SamePath $_.Path $fixtureExe})){Stop-VerifiedProcess $fixture}}
 Write-Output "PASSED: $script:passed compiled-host checks. Output: $root"

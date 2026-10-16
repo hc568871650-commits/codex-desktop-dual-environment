@@ -35,11 +35,40 @@ function Wait-ExpectedProcessExitUi($Expected,[string]$Message,[int]$TimeoutMill
     }catch [ArgumentException]{if($process){$process.Dispose()};if($PassThru){return $alreadyExited};return $true}
     catch{if($process){$process.Dispose()};throw}
     try{
-        $owner=[Windows.Forms.Form]::ActiveForm
-        if(-not $owner -and $panel -and $panel.Visible){$owner=$panel}
-        $result=[CodexDual.ExitWaitDialog]::Show($process,'正在退出',$Message,$TimeoutMilliseconds,$owner)
+        Set-UiMessage $Message
+        $result=[CodexDual.ExitWaitDialog]::WaitInline($process,$TimeoutMilliseconds)
         if($PassThru){return $result};return [bool]$result.Exited
     }finally{$process.Dispose()}
+}
+function Confirm-InstanceExit([string]$Label) {
+    $message="退出$Label？确认后将直接结束该实例，可能中断任务或丢失未保存内容。"
+    return [Windows.Forms.MessageBox]::Show($message,'确认退出','YesNo','Warning','Button2') -eq 'Yes'
+}
+function Close-Instance($instance) {
+    Invoke-InstanceLocked $instance {
+        $status=Get-InstanceStatus $config $instance
+        $label=Get-InstanceDisplayName $instance $script:preferences
+        if($status.State -eq 'Stopped'){Set-UiMessage ($label+' 已退出');return}
+        $process=$status.Process;Assert-NotCurrentHost $process
+        if(-not (Confirm-InstanceExit $label)){return}
+        if($script:exitDetails){$script:exitDetails.SetToolTip($script:feedback,'')}
+        if(-not $panel.Visible){Show-ControlPanel}
+        Set-PanelOpenBusy $true
+        try {
+            $before=Get-ProcessSnapshot
+            $owned=@(Stop-InstanceForced $instance $process -UserConfirmed)
+            $exited=Wait-ExpectedProcessExitUi -Expected $process -Message ('正在退出 '+$label+'…') -TimeoutMilliseconds 2000
+            if(-not $exited){
+                Set-UiMessage ($label+' 退出尚未完成，请稍后检查状态。')
+                return
+            }
+            $residual=@(Get-ExitResiduals $before $owned)
+            $message=$label+' 已退出'
+            if($residual.Count){$message=$label+' 桌面主进程已退出；保留 '+$residual.Count+' 个残留进程（详情见悬停提示）'}
+            Set-UiMessage $message
+            if($script:exitDetails){$script:exitDetails.SetToolTip($script:feedback,($residual|ForEach-Object {"PID $($_.Id) / $($_.Name)"}) -join [Environment]::NewLine)}
+        }finally{Set-PanelOpenBusy $false}
+    }
 }
 function Update-PanelNames {
     $script:preferences=Read-ControllerPreferences $config

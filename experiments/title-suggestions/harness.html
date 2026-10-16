@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>标题建议独立测试</title><link rel="stylesheet" href="style.css"></head>
+<body><main><p class="tag">双开体验 · 独立测试</p><h1>标题建议</h1>
+<p>此页面不连接 Codex 窗口，不修改任何真实聊天。先确认模式，再打开预览。</p>
+<p id="mode">正在核实服务模式…</p>
+<label>模拟聊天标识<input id="thread" value="preview-thread-a" maxlength="100"></label>
+<label>用于生成标题的摘录<textarea id="context" rows="5">希望改善 Codex 双开体验，添加重命名时的标题建议，保留两个实例的环境隔离。</textarea></label>
+<p class="hint">真实模式会将此摘录发送到已选 API；建议先使用上面的合成内容。</p>
+<p>当前预览标题：<strong id="saved">双开项目讨论</strong></p><button id="open" disabled>打开重命名预览</button>
+<dialog id="dialog"><form id="form"><h2>重命名聊天 · 预览</h2><label>名称<input id="title" maxlength="60" autocomplete="off"></label>
+<section aria-live="polite"><p id="state"></p><p id="suggestion"></p><button id="use" type="button" disabled>采用建议</button><button id="again" type="button">再想一个</button></section>
+<div class="actions"><button id="cancel" type="button">取消</button><button type="submit">保存到此预览</button></div></form></dialog>
+<p class="hint">关闭后返回的结果会丢弃；重复打开可复用 5 分钟缓存。手动输入过文字后，建议只供参考。</p></main><script src="suggestion.js"></script><script src="harness.js"></script></body></html>

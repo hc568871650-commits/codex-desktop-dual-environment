@@ -28,7 +28,10 @@ try{
     $psi.Arguments='-NoProfile -STA -ExecutionPolicy Bypass -File "'+$controller+'" -ConfigPath "'+$path+'" -SmokeTest'
     $psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
     $p=[Diagnostics.Process]::Start($psi);$out=$p.StandardOutput.ReadToEnd();$err=$p.StandardError.ReadToEnd();$p.WaitForExit()
-    if($p.ExitCode -eq 0 -or -not $err.Contains('Controller already running')){throw 'Singleton enforcement failed'}
+    if($p.ExitCode -eq 0 -or -not $err.Contains('Controller already running')){
+        Write-AtomicText (Join-Path $root 'singleton-failure.json') (@{exitCode=$p.ExitCode;stdout=$out;stderr=$err;configPath=$path;mutexName=('Local\CodexDual.Controller.'+$sid+'.Smoke.'+$hash)}|ConvertTo-Json -Depth 4)
+        $p.Dispose();throw ('Singleton enforcement failed; evidence: '+(Join-Path $root 'singleton-failure.json'))
+    }
     $p.Dispose();Write-Output 'PASS: second controller process refused by per-user mutex'
 }finally{$mutex.ReleaseMutex();$mutex.Dispose()}
 Write-Output 'PASSED: 4 controller checks'

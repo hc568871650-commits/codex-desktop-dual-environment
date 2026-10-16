@@ -17,6 +17,8 @@ function Start-WaitFixture([int]$Milliseconds){
     return [Diagnostics.Process]::Start($info)
 }
 $panel=New-Object Windows.Forms.Form
+$script:feedback=New-Object Windows.Forms.Label
+$panel.Controls.Add($script:feedback)
 $fixtures=New-Object 'Collections.Generic.List[Diagnostics.Process]'
 try{
     $short=Start-WaitFixture 2000;$fixtures.Add($short);$expected=Get-Expected $short

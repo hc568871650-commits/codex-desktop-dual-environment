@@ -19,6 +19,7 @@ namespace CodexDual {
   readonly ConcurrentQueue<QuestionBridgeReply> results=new ConcurrentQueue<QuestionBridgeReply>();
   int busy;volatile bool disposed;
   public bool Busy { get { return Volatile.Read(ref busy)!=0; } }
+  public bool HasPendingResults { get { return !results.IsEmpty; } }
   [DllImport("kernel32.dll",SetLastError=true)]static extern bool GetNamedPipeServerProcessId(IntPtr pipe,out uint pid);
   public QuestionBridgeClient(string pipe,string proxy,string instance,string disabled) { pipeName=pipe;proxyPath=Path.GetFullPath(proxy);instanceId=instance;disabledPath=disabled; }
   public bool StartSnapshot(){return StartSnapshot(true);}

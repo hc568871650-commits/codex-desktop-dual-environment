@@ -1,12 +1,12 @@
-﻿# 从旧版升级到 0.8.8
+# 从旧版升级到 0.8.9 候选版
 
-v0.8.8 累计包含 0.8.4–0.8.8 的更新，前一个公开版本为 v0.8.3；0.8.4–0.8.7 未单独公开发布。完整包、升级包及 SHA-256 清单见 [v0.8.8 Release](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/tag/v0.8.8)。
+0.8.9 正在准备发布，前一个公开版本为 v0.8.8；本次标准范围为退出交互、组件诊断和问答保护。实验扩展不随标准包安装。公开下载状态见 [Releases](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases)，本次边界见 [版本说明](VERSION-0.8.9-CANDIDATE.md)。
 
 无需重新输入密钥，也不搬动原来的 Codex 数据。升级只在工具目录内进行。0.2 及以后的版本保留现有 instances.local.json；仅迁移 0.1 时默认读取 `%LOCALAPPDATA%\CodexDualLauncher\settings.json`，这是 0.1 启动器的设置位置。
 
 ## 推荐：使用升级包
 
-1. 将 `CodexDualLauncher-0.8.8-windows.zip` 或 `CodexDualLauncher-0.x-to-0.8.8-upgrade.zip` 解压到一个新文件夹。
+1. 将 `CodexDualLauncher-0.8.9-windows.zip` 或 `CodexDualLauncher-0.x-to-0.8.9-upgrade.zip` 解压到一个新文件夹。
 2. 关闭旧版启动器/控制器窗口。**官方和 API Codex 可以继续运行，不需要退出。**
 3. 双击新文件夹里的 **Start.cmd** 或 **Install.cmd**，自动识别并更新原安装；多个候选目录时才选择。若未能识别自定义位置，可使用 `Upgrade.cmd` 手动选择旧工具目录。不要选择官方 home 或 API 数据目录。
 4. 统一入口完成后会打开原目录的控制器，并补建缺失的控制面板桌面入口；已有数据、密钥和实例 ID 保留。
@@ -16,7 +16,7 @@ v0.8.8 累计包含 0.8.4–0.8.8 的更新，前一个公开版本为 v0.8.3；
 ## 也支持：直接覆盖解压
 
 1. 关闭旧启动器/控制器；两套 Codex 保持运行。
-2. 将 **0.8.8 完整包**解压到旧工具文件夹，同名工具文件选择替换。
+2. 将 **0.8.9 完整包**解压到旧工具文件夹，同名工具文件选择替换。
 3. 双击 **Start.cmd**。已有安装复用本机实例配置并按需修复控制程序；只有迁移 0.1 时才读取旧设置并生成新格式的实例配置。
 
 完整包不包含 `settings.json`、`instances.local.json`、认证、密钥或用户数据，所以不会通过压缩包同名文件覆盖这些内容。

@@ -1,5 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 
+. "$PSScriptRoot\ComponentHealth.ps1"
+
 function Get-DiagnosticValue($Object, [string]$Name, $Default = $null) {
     if($Object -is [System.Collections.IDictionary] -and $Object.Contains($Name)){return $Object[$Name]}
     if($null -ne $Object -and $null -ne $Object.PSObject.Properties[$Name]){return $Object.$Name}
@@ -39,7 +41,7 @@ function Add-DiagnosticCheck($Checks, [string]$Role, [string]$Code, [string]$Sev
 function Get-ControllerDiagnostics($Config, [string]$ToolRoot) {
     $checks=New-Object 'Collections.Generic.List[object]'
     $instances=New-Object 'Collections.Generic.List[object]'
-    $version='unknown'
+    $version='unknown';$buildRevision='unknown'
     try {
         $safeToolRoot=Get-FullDirectory $ToolRoot
         Assert-NoReparsePoint $safeToolRoot
@@ -48,6 +50,8 @@ function Get-ControllerDiagnostics($Config, [string]$ToolRoot) {
         $data=Get-Content -LiteralPath $versionFile -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         $candidate=[string](Get-DiagnosticValue $data 'version' '')
         if((Get-DiagnosticValue $data 'product' '') -eq 'codex-desktop-dual-environment' -and $candidate -match '^\d{1,4}(\.\d{1,4}){1,3}$'){$version=$candidate}
+        $revision=[string](Get-DiagnosticValue $data 'buildRevision' '')
+        if($version -ne 'unknown' -and $revision -cmatch '^(candidate|release|local)-[0-9]{8}-[a-z0-9-]{1,40}$'){$buildRevision=$revision}
     }catch{}
     if($version -eq 'unknown'){Add-DiagnosticCheck $checks 'controller' 'VERSION_UNKNOWN' 'warning'}
 
@@ -146,7 +150,7 @@ function Get-ControllerDiagnostics($Config, [string]$ToolRoot) {
         }
         $instances.Add([pscustomobject]@{Role=$role;State=$state;Directories=[pscustomobject]$directories;ManagementMode=$mode;CredentialEntryPresent=$credential})
     }
-    return [pscustomobject]@{Schema=1;Version=$version;Runtime=[pscustomobject]@{OS=$os;PowerShell=$psVersion};Instances=@($instances.ToArray());Checks=@($checks.ToArray())}
+    return [pscustomobject]@{Schema=1;Version=$version;BuildRevision=$buildRevision;Runtime=[pscustomobject]@{OS=$os;PowerShell=$psVersion};Instances=@($instances.ToArray());Checks=@($checks.ToArray());Components=@(Get-ControllerComponentHealth $Config)}
 }
 
 function ConvertTo-ControllerDiagnosticText($Report) {
@@ -170,6 +174,12 @@ function ConvertTo-ControllerDiagnosticText($Report) {
             [void]$lines.Add('  管理方式：'+$mode)
             if($null -ne $instance.CredentialEntryPresent){[void]$lines.Add('  凭据入口：'+$(if([bool]$instance.CredentialEntryPresent){'存在（未验证有效性）'}else{'缺少'}))}
         }
+    }
+    $revision=[string](Get-DiagnosticValue $Report 'BuildRevision' '')
+    if($revision -cmatch '^(candidate|release|local)-[0-9]{8}-[a-z0-9-]{1,40}$'){[void]$lines.Add('构建：'+$revision)}
+    foreach($component in @(Get-DiagnosticValue $Report 'Components' @())) {
+        $description=Get-ComponentHealthText $component
+        if($description){[void]$lines.Add($description)}
     }
     foreach($check in @($Report.Checks)) {
         $safe=New-Object 'Collections.Generic.List[object]'

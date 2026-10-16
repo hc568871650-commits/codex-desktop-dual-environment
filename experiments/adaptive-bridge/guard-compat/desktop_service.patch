@@ -1,0 +1,92 @@
+--- production/desktop_service.py
++++ candidate/desktop_service.py
+@@ -26,6 +26,7 @@
+ DESKTOP_PROFILE = Path(r"E:\Codex-API\DesktopProfile")
+ STATE_NAME = Path("plugin-state") / "first-token-guard"
+ VERSION = "0.3.0"
++BRIDGE_PROBE_SHA256 = "5A53705028EC16834A7B62E2863328A2C5421236895A5BFB407A65DB9E352503"
+ 
+ 
+ def _atomic_json(path: Path, value: dict) -> None:
+@@ -611,6 +612,62 @@
+         self._probe_cache = (now, bool(running), identity)
+         return bool(running), identity
+ 
++    def _verified_bridge_backends(self, identity):
++        """Read-only pinned probe for the single validated Desktop -> bridge -> CLI chain."""
++        if not isinstance(identity, str) or not re.fullmatch(r"\d+(?:,\d+)*", identity):
++            return []
++        try:
++            probe = Path(__file__).with_name("Guard-BridgeRuntime.ps1")
++            binding_path = probe.with_name("guard-runtime-binding.json")
++            for path in (probe, binding_path):
++                if path.is_symlink() or path.stat().st_file_attributes & 0x400:
++                    return []
++            if hashlib.sha256(probe.read_bytes()).hexdigest().upper() != BRIDGE_PROBE_SHA256:
++                return []
++            with binding_path.open("rb") as stream:
++                raw = stream.read(8193)
++            if len(raw) > 8192:
++                return []
++            binding = json.loads(raw.decode("utf-8-sig"))
++            integration = Path(binding.get("integrationPath", ""))
++            if (binding.get("schema") != 1 or not integration.is_absolute() or
++                    integration.name != "integration.json" or
++                    not integration.resolve().is_relative_to(Path(r"E:\Codex-API\AdaptiveBridge").resolve()) or
++                    not re.fullmatch(r"[a-fA-F0-9]{64}", binding.get("integrationHash", "")) or
++                    not re.fullmatch(r"[a-fA-F0-9]{64}", binding.get("launchHelperHash", ""))):
++                return []
++            powershell = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe")
++            environment = os.environ.copy()
++            environment.pop("PSModulePath", None)
++            out = subprocess.run([powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
++                                  "-File", str(probe), "-ApiHome", str(self.home), "-Profile", str(self.profile),
++                                  "-DesktopIds", identity], capture_output=True, text=True, encoding="utf-8",
++                                 env=environment, timeout=12, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
++            if out.returncode or len(out.stdout) > 16384:
++                return []
++            payload = json.loads(out.stdout)
++            if (not isinstance(payload, dict) or payload.get("schema") != 1 or
++                    self._canonical_path(payload.get("apiHome", "")) != self._canonical_path(str(self.home)) or
++                    self._canonical_path(payload.get("profile", "")) != self._canonical_path(str(self.profile))):
++                return []
++            rows = payload.get("rows")
++            if not isinstance(rows, list) or len(rows) != 1:
++                return []
++            row = rows[0]
++            parents = {int(part) for part in identity.split(",")}
++            if (not isinstance(row, dict) or row.get("VerifiedBridge") is not True or
++                    any(type(row.get(key)) is not int or row[key] <= 0 for key in
++                        ("ProcessId", "ParentProcessId", "DesktopProcessId", "BridgeProcessId", "Started")) or
++                    row["DesktopProcessId"] not in parents or row["ParentProcessId"] != row["BridgeProcessId"] or
++                    len({row["ProcessId"], row["BridgeProcessId"], row["DesktopProcessId"]}) != 3):
++                return []
++            exe = Path(self._canonical_path(row.get("ExecutablePath", "")))
++            if not exe.is_absolute() or exe.name.lower() != "codex.exe" or not exe.is_file():
++                return []
++            return rows
++        except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
++            return []
++
+     def discover_cli(self, force=False):
+         now = self.clock()
+         running, identity = self.api_process(now)
+@@ -651,6 +708,9 @@
+                 if exe.is_absolute() and exe.name.lower() == "codex.exe" and exe.is_file():
+                     candidates.append((row["ProcessId"], exe.resolve()))
+             unique = {path for _pid, path in candidates}
++            if not candidates:
++                verified = self._verified_bridge_backends(identity)
++                unique = {Path(self._canonical_path(row["ExecutablePath"])).resolve() for row in verified}
+             return next(iter(unique)) if len(unique) == 1 else None
+         except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+             return None
+@@ -765,6 +825,8 @@
+             return {}
+         rows = json.loads(result.stdout or "[]")
+         if isinstance(rows, dict): rows = [rows]
++        if not rows:
++            rows = self._verified_bridge_backends(identity)
+         return {"pid:" + str(row["ProcessId"]) + ":": int(row["Started"]) for row in rows}
+ 
+     def runtime_status(self, running=None):
