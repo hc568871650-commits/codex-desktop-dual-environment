@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="../../src/TomlConfig.cs" Link="Compatibility/TomlConfig.cs" />
+    <Compile Include="../../src/QuestionBridgeClient.cs" Link="Compatibility/QuestionBridgeClient.cs" />
+  </ItemGroup>
+</Project>

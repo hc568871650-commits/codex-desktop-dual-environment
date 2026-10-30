@@ -122,6 +122,14 @@ namespace CodexDual {
    Entry e; if(!entries.TryGetValue(Id(ParsePath(dottedPath)),out e)) return null;
    return Decode(source.Substring(e.Start,e.End-e.Start));
   }
+  // Read-only access for the C# route adapter; retain the lossless editor's path rules.
+  public string GetRaw(string dottedPath) {
+   Entry e;return entries.TryGetValue(Id(ParsePath(dottedPath)),out e)?source.Substring(e.Start,e.End-e.Start):null;
+  }
+  public Dictionary<string,string> DirectValues(string dottedPath) {
+   string[] parent=String.IsNullOrEmpty(dottedPath)?new string[0]:ParsePath(dottedPath);
+   return entries.Values.Where(e=>e.Path.Length==parent.Length+1&&Prefix(parent,e.Path)).ToDictionary(e=>e.Path.Last(),e=>source.Substring(e.Start,e.End-e.Start),StringComparer.Ordinal);
+  }
   public bool HasPrefix(string dottedPath) {
    string[] path=ParsePath(dottedPath);
    return entries.Values.Any(e=>Prefix(path,e.Path)) || tables.Values.Any(t=>Prefix(path,t.Path)) || arrays.Any(p=>Prefix(path,p));

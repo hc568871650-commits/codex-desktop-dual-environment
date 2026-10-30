@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {chromium} = require('playwright');
-const script = fs.readFileSync(path.join(__dirname, 'renderer.js'), 'utf8');
+const script = fs.readFileSync(process.env.TITLE_RENDERER_UNDER_TEST || path.join(__dirname, 'renderer.js'), 'utf8');
 const A = '11111111-1111-4111-8111-111111111111', B = '22222222-2222-4222-8222-222222222222';
 (async () => {
  const browser = await chromium.launch({headless: true, ...(process.env.TITLE_TEST_CHANNEL ? {channel: process.env.TITLE_TEST_CHANNEL} : {})});

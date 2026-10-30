@@ -37,3 +37,6 @@ experiments/**/binding.json
 experiments/**/integration.json
 experiments/**/guard-runtime-binding.json
 experiments/**/*.sidecar.json
+dotnet/**/bin/
+dotnet/**/obj/
+.tools/

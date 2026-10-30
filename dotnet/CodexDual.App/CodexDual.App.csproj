@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>CodexDualController</AssemblyName>
+    <ApplicationIcon>../../assets/controller.ico</ApplicationIcon>
+    <!-- Existing controls are composed at runtime; no designer serialization is used. -->
+    <NoWarn>$(NoWarn);WFO1000</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CodexDual.Core/CodexDual.Core.csproj" />
+    <Compile Include="../../src/UiTheme.cs" Link="Controls/UiTheme.cs" />
+    <Compile Include="../../src/CompletionCard.cs" Link="Controls/CompletionCard.cs" />
+    <Compile Include="../../src/TrayClick.cs" Link="Controls/TrayClick.cs" />
+    <Compile Include="../../src/TrayPopup.cs" Link="Controls/TrayPopup.cs" />
+    <Compile Include="../../src/QuestionWindow.cs" Link="Controls/QuestionWindow.cs" />
+    <Content Include="../../assets/controller.ico" Link="assets/controller.ico" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="title-renderer.js" />
+    <Content Include="../../config/question-preview.json" Link="config/question-preview.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -2,6 +2,8 @@
 
 **在 Windows 上同时使用官方订阅与自选 API，用一个控制器管理两个 Codex Desktop。**
 
+本分支新增 [C# / .NET 10 本机迁移预览](docs/DOTNET-MIGRATION.md)，代码与构建入口位于 `dotnet/` 和 `scripts/Build-DotNet.ps1`。预览的安装、性能证据和剩余验收边界见该文档；下面的公开发布说明仍对应 0.8.9 标准包。
+
 两套 Desktop 可以同时打开，分别使用自己的配置与凭据入口。你负责把任务分给两个窗口；控制器负责启动、找回窗口、管理 API 渠道，以及提供 API 任务提醒。
 
 [公开版下载](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/latest) · [快速开始](#快速开始) · [升级指南](docs/UPGRADE.md) · [0.8.9 发布说明](docs/RELEASE-0.8.9.md) · [验证记录](docs/VALIDATION.md)
