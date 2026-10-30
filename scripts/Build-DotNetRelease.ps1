@@ -17,7 +17,9 @@ foreach($name in @('Install.ps1','DotNet-Package.ps1','Bootstrap-DotNet.ps1','In
 }
 [void][IO.Directory]::CreateDirectory((Join-Path $package 'docs'))
 foreach($name in @('DOTNET-INSTALL.md',('RELEASE-'+$version.version+'.md'))){Copy-Item -LiteralPath (Join-Path $root ('docs\'+$name)) -Destination (Join-Path $package ('docs\'+$name))}
-Copy-Item -LiteralPath (Join-Path $root 'docs\DOTNET-INSTALL.md') -Destination (Join-Path $package 'README.md')
+Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination (Join-Path $package 'README.md')
+[void][IO.Directory]::CreateDirectory((Join-Path $package 'docs\images'))
+Copy-Item -LiteralPath (Join-Path $root 'docs\images\0.9') -Destination (Join-Path $package 'docs\images\0.9') -Recurse
 $license=Join-Path $root 'LICENSE';if(Test-Path -LiteralPath $license){Copy-Item -LiteralPath $license -Destination $package}
 $commands=@{
  'Start.cmd'='if exist "%~dp0instances.local.json" (start "" "%~dp0CodexDualController.exe" --config "%~dp0instances.local.json") else (powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0scripts\Bootstrap-DotNet.ps1" %*)'
