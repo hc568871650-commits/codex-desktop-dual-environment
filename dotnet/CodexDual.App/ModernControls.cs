@@ -114,6 +114,8 @@ internal sealed class ChoicePicker : Control
 {
     private readonly (string Value, string Label)[] choices;
     private int selected;
+    private QuietMenu? popup;
+    internal ContextMenuStrip? DropDown => popup;
     public string Value { get => choices[selected].Value; set { int index = Array.FindIndex(choices, c => c.Value == value); if (index >= 0) selected = index; Invalidate(); } }
     public event EventHandler? ValueChanged;
     public ChoicePicker(params (string Value, string Label)[] choices)
@@ -130,9 +132,33 @@ internal sealed class ChoicePicker : Control
     }
     protected override void OnClick(EventArgs e)
     {
-        base.OnClick(e); Focus(); var menu = new QuietMenu { Font = Font, MinimumSize = new Size(Width, 0) };
-        for (int n = 0; n < choices.Length; n++) { int index = n; var item = new ToolStripMenuItem(choices[n].Label) { Checked = n == selected }; item.Click += (_, _) => Select(index); menu.Items.Add(item); item.Padding = new Padding(10); }
-        menu.Closed += (_, _) => menu.Dispose(); menu.Show(this, new Point(0, Height + 4));
+        base.OnClick(e); OpenDropDown();
+    }
+    internal void OpenDropDown()
+    {
+        if (IsDisposed || Disposing || !Enabled) return;
+        Focus();
+        if (popup == null)
+        {
+            popup = new QuietMenu();
+            for (int n = 0; n < choices.Length; n++)
+            {
+                int index = n;
+                var item = new ToolStripMenuItem(choices[n].Label) { Tag = choices[n].Value };
+                item.Click += (_, _) => Select(index); popup.Items.Add(item); item.Padding = new Padding(10);
+            }
+        }
+        popup.Font = Font; popup.MinimumSize = new Size(Width, 0);
+        for (int n = 0; n < popup.Items.Count; n++) ((ToolStripMenuItem)popup.Items[n]).Checked = n == selected;
+        AppTheme.ApplyTo(popup);
+        popup.Show(this, new Point(0, Height + 4));
+    }
+    protected override void Dispose(bool disposing)
+    {
+        // Closed fires before ToolStrip has finished processing the click.
+        // Keep the menu alive until its owning picker is disposed.
+        if (disposing) { popup?.Dispose(); popup = null; }
+        base.Dispose(disposing);
     }
     private void Select(int index) { if (selected == index) return; selected = index; Invalidate(); ValueChanged?.Invoke(this, EventArgs.Empty); }
     protected override bool IsInputKey(Keys keyData) => keyData is Keys.Up or Keys.Down || base.IsInputKey(keyData);

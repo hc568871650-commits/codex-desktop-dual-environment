@@ -255,6 +255,32 @@ public sealed partial class MainWindow : ShellForm
     private async Task Smoke()
     {
         string folder = Program.Option(args, "--screenshots"); if (folder.Length > 0) Directory.CreateDirectory(folder);
+        int menuSelections = 0;
+        if (args.Contains("--smoke-interactions"))
+        {
+            SelectPage("偏好设置");
+            foreach (var picker in pages["偏好设置"].Controls.OfType<ChoicePicker>())
+            {
+                string original = picker.Value;
+                for (int round = 0; round < 3; round++)
+                {
+                    picker.OpenDropDown(); await Task.Delay(40);
+                    var menu = picker.DropDown ?? throw new InvalidOperationException("Menu did not open.");
+                    for (int n = 0; n < menu.Items.Count; n++)
+                    {
+                        picker.OpenDropDown(); await Task.Delay(20);
+                        var item = (ToolStripMenuItem)menu.Items[n]; item.PerformClick(); menu.Close(ToolStripDropDownCloseReason.ItemClicked);
+                        await Task.Delay(20);
+                        if (menu.IsDisposed || picker.Value != (string)item.Tag!) throw new InvalidOperationException("Selection disposed its menu or was not applied.");
+                        menuSelections++;
+                    }
+                    picker.OpenDropDown(); menu.Close(ToolStripDropDownCloseReason.Keyboard); await Task.Delay(20);
+                    if (menu.IsDisposed) throw new InvalidOperationException("Cancelled menu was disposed early.");
+                }
+                picker.OpenDropDown(); var owned = picker.DropDown!;
+                owned.Items.OfType<ToolStripMenuItem>().Single(i => (string)i.Tag! == original).PerformClick(); owned.Close();
+            }
+        }
         foreach (string name in pages.Keys)
         {
             SelectPage(name); await Task.Delay(100);
@@ -267,7 +293,7 @@ public sealed partial class MainWindow : ShellForm
             if (folder.Length > 0) { using var bitmap = new Bitmap(Width, Height); DrawToBitmap(bitmap, new Rectangle(0, 0, Width, Height)); bitmap.Save(Path.Combine(folder, name + ".png")); }
         }
         string report = Program.Option(args, "--report");
-        if (report.Length > 0) Json.Write(report, new { success = true, pages = pages.Keys, headerActionsHitTestPassed = true, readyMilliseconds, privateBytes = Process.GetCurrentProcess().PrivateMemorySize64, scope = "isolated real WinForms controls; no model call, no native chat rename" });
+        if (report.Length > 0) Json.Write(report, new { success = true, pages = pages.Keys, menuSelections, headerActionsHitTestPassed = true, readyMilliseconds, privateBytes = Process.GetCurrentProcess().PrivateMemorySize64, scope = "isolated real WinForms controls; no model call, no native chat rename" });
         Quit();
     }
 }
