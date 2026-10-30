@@ -16,22 +16,24 @@ function Install-Fixture([string]$source,[string]$name){
  & (Join-Path $source 'scripts\Install.ps1') -InstallDirectory $target -DataDirectory $data -OfficialHome $official -Executable "$env:SystemRoot\System32\notepad.exe" -BaseUrl 'https://example.invalid/v1' -Model 'fixture' -ApiKey $key -ShortcutDirectory $links|Out-Host
  return $target
 }
-function Smoke([string]$target,[string]$theme){
- $config=Join-Path $target 'instances.local.json';$state=Join-Path $root ('ui-'+$theme)
+function Smoke([string]$target,[string]$theme,[bool]$compact=$false){
+ $label=$theme+$(if($compact){'-compact'}else{''})
+ $config=Join-Path $target 'instances.local.json';$state=Join-Path $root ('ui-'+$label)
  [void][IO.Directory]::CreateDirectory($state)
  @{schema=1;appearance=@{mode=$theme;accent='neutral'}}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $state 'preferences.local.json') -Encoding UTF8
- $report=Join-Path $root ('ui-'+$theme+'.json')
+ $report=Join-Path $root ('ui-'+$label+'.json')
  $info=New-Object Diagnostics.ProcessStartInfo
  $info.FileName=Join-Path $target 'CodexDualController.exe';$info.UseShellExecute=$false;$info.CreateNoWindow=$true
- $info.Arguments='--trial --smoke-ui --smoke-interactions --config "'+$config+'" --state-directory "'+$state+'" --report "'+$report+'" --screenshots "'+(Join-Path $root ('screenshots-'+$theme))+'"'
+ $info.Arguments='--trial --smoke-ui --smoke-interactions --config "'+$config+'" --state-directory "'+$state+'" --report "'+$report+'" --screenshots "'+(Join-Path $root ('screenshots-'+$label))+'"'
+ if($compact){$info.Arguments+=' --smoke-compact'}
  $info.EnvironmentVariables['DOTNET_ROOT']=Join-Path $root 'no-runtime'
  $info.EnvironmentVariables['DOTNET_ROOT_X64']=Join-Path $root 'no-runtime'
  $info.EnvironmentVariables['DOTNET_MULTILEVEL_LOOKUP']='0'
  $p=[Diagnostics.Process]::Start($info)
- try{if(-not $p.WaitForExit(60000)){$p.Kill();throw 'Isolated UI timed out.'};Check ($p.ExitCode -eq 0) ($theme+' UI process exit')}finally{$p.Dispose()}
- Check ((Test-Path -LiteralPath $report) -and -not(Test-Path -LiteralPath ($report+'.exception.json')) -and (Test-Path -LiteralPath ($report+'.exited'))) ($theme+' clean UI report')
+ try{if(-not $p.WaitForExit(60000)){$p.Kill();throw 'Isolated UI timed out.'};Check ($p.ExitCode -eq 0) ($label+' UI process exit')}finally{$p.Dispose()}
+ Check ((Test-Path -LiteralPath $report) -and -not(Test-Path -LiteralPath ($report+'.exception.json')) -and (Test-Path -LiteralPath ($report+'.exited'))) ($label+' clean UI report')
  $result=Get-Content -LiteralPath $report -Raw -Encoding UTF8|ConvertFrom-Json
- Check ($result.success -and $result.menuSelections -ge 30 -and $result.headerActionsHitTestPassed) ($theme+' dropdown and header interaction')
+ Check ($result.success -and $result.menuSelections -ge 30 -and $result.headerActionsHitTestPassed) ($label+' dropdown and header interaction')
 }
 try{
  . (Join-Path $Package 'scripts\DotNet-Package.ps1')
@@ -46,7 +48,7 @@ try{
  $links=Join-Path (Split-Path $fresh -Parent) 'Links'
  $apiLink=[CodexDual.UnicodeShortcut]::Read((Join-Path $links 'Codex API.lnk'))
  Check ($apiLink[0] -eq (Join-Path $fresh 'CodexDualController.exe') -and $apiLink[1].Contains('--open-instance --role api') -and $apiLink[2] -eq $fresh) 'Unicode shortcut roundtrip uses C# entry'
- Smoke $fresh 'dark';Smoke $fresh 'light'
+ Smoke $fresh 'dark';Smoke $fresh 'light';Smoke $fresh 'dark' $true
  & (Join-Path $Package 'scripts\Set-DotNetTitle.ps1') -ConfigPath (Join-Path $fresh 'instances.local.json') -Mode enable -Model fixture|Out-Null
  $settings=Get-Content -LiteralPath (Join-Path $freshConfig.stateDirectory 'dotnet-title.local.json') -Raw -Encoding UTF8|ConvertFrom-Json
  Check ($settings.enabled -and $settings.credentialFiles.CODEX_DUAL_API_KEY -eq $keyPath) 'Explicit title enable binds managed encrypted credential'

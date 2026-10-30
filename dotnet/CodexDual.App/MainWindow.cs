@@ -100,7 +100,27 @@ public sealed partial class MainWindow : ShellForm
     {
         // Reserve the right-hand header area for actions. An empty Label still
         // paints its background and can cover sibling buttons in a live window.
-        AddLabel(page, title, 0, 0, 520, 48).Font = new Font(Font.FontFamily, 21, FontStyle.Bold);
+        var label = AddLabel(page, title, 0, 0, 520, 48);
+        label.Name = "PageTitle"; label.Font = new Font(Font.FontFamily, 21, FontStyle.Bold);
+        page.Resize += (_, _) => LayoutPageHeader(page);
+    }
+    private static QuietButton AddHeaderButton(Panel page, string text, int width, Action click)
+    {
+        var button = AddButton(page, text, 0, 0, width, click);
+        button.Tag = "HeaderAction"; button.BringToFront(); LayoutPageHeader(page); return button;
+    }
+    private static void LayoutPageHeader(Panel page)
+    {
+        // The viewport can shrink when Windows fits the window to a small screen,
+        // or when AutoScroll introduces a vertical scrollbar. Keep actions inside it.
+        int right = Math.Max(0, page.ClientSize.Width - 22);
+        foreach (var button in page.Controls.OfType<Button>().Where(b => Equals(b.Tag, "HeaderAction")))
+        {
+            button.Left = Math.Max(0, right - button.Width); button.Top = 0;
+            right = button.Left - 16;
+        }
+        if (page.Controls.OfType<Label>().FirstOrDefault(l => l.Name == "PageTitle") is { } title)
+            title.Width = Math.Max(0, right);
     }
     private static void Divider(Control parent, int y, int width = 770)
     { var line = new Hairline { Location = new Point(0, y), Width = width }; parent.Controls.Add(line); }
@@ -254,6 +274,7 @@ public sealed partial class MainWindow : ShellForm
     }
     private async Task Smoke()
     {
+        if (args.Contains("--smoke-compact")) { Size = MinimumSize; await Task.Delay(100); }
         string folder = Program.Option(args, "--screenshots"); if (folder.Length > 0) Directory.CreateDirectory(folder);
         int menuSelections = 0;
         if (args.Contains("--smoke-interactions"))
@@ -288,7 +309,7 @@ public sealed partial class MainWindow : ShellForm
             {
                 foreach (int x in new[] { button.Left + 5, button.Left + button.Width / 2, button.Right - 5 })
                     if (!ReferenceEquals(pages[name].GetChildAtPoint(new Point(x, button.Top + button.Height / 2)), button))
-                        throw new InvalidOperationException("Header action is covered: " + name + "/" + button.Text);
+                        throw new InvalidOperationException("Header action is covered: " + name + "/" + button.Text + "; button=" + button.Bounds + "; viewport=" + pages[name].ClientSize + "; form=" + Size + "; dpi=" + DeviceDpi);
             }
             if (folder.Length > 0) { using var bitmap = new Bitmap(Width, Height); DrawToBitmap(bitmap, new Rectangle(0, 0, Width, Height)); bitmap.Save(Path.Combine(folder, name + ".png")); }
         }

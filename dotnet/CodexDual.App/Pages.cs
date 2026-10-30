@@ -19,7 +19,7 @@ public sealed partial class MainWindow
     private void BuildTitles(Panel page)
     {
         PageTitle(page, "标题工具");
-        AddButton(page, "返回高级", 630, 0, 140, () => SelectPage("诊断")).Quiet = true;
+        AddHeaderButton(page, "返回高级", 140, () => SelectPage("诊断")).Quiet = true;
         var listFrame = new SoftSurface(); listFrame.SetBounds(0, 88, 770, 268); page.Controls.Add(listFrame);
         chats.SetBounds(10, 12, 750, 244); chats.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right; listFrame.Controls.Add(chats);
         chats.SelectedIndexChanged += (_, _) =>
@@ -93,7 +93,7 @@ public sealed partial class MainWindow
     private void BuildNotifications(Panel page)
     {
         PageTitle(page, "通知");
-        AddButton(page, "预览", 650, 0, 120, () => ShowNotice("完成提醒预览", "已完成", () => { }, true)).Quiet = true;
+        AddHeaderButton(page, "预览", 120, () => ShowNotice("完成提醒预览", "已完成", () => { }, true)).Quiet = true;
         var enabled = new ModernToggle { Text = "完成提醒", Checked = notificationSettings["enabled"]?.GetValue<bool>() != false }; enabled.SetBounds(0, 88, 770, 48); page.Controls.Add(enabled);
         enabled.CheckedChanged += (_, _) => RunUi(async () => { notificationSettings["enabled"] = enabled.Checked; SaveNotificationSettings(); if (enabled.Checked) StartMonitor(); else if (monitor != null) { await monitor.DisposeAsync(); monitor = null; notice?.Close(); } });
         Divider(page, 145); Divider(page, 213); Divider(page, 292);
