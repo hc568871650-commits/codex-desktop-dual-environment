@@ -92,14 +92,19 @@ try {
     if(-not $NoShortcuts){
         $installStage='创建快捷方式'
         [void][IO.Directory]::CreateDirectory($ShortcutDirectory);$shell=New-Object -ComObject WScript.Shell
+        if($prebuilt -and -not ('CodexDual.UnicodeShortcut' -as [type])){Add-Type -Path (Join-Path $source 'src\UnicodeShortcut.cs')}
         foreach($pair in @(@('Codex Official','official','official.ico'),@('Codex API','api','api.ico'),@('Codex Dual Controller','tray','controller.ico'))){
             $linkPath=Join-Path $ShortcutDirectory ($pair[0]+'.lnk')
             if(Test-Path -LiteralPath $linkPath){throw '同名快捷方式已存在，保留原文件；请选择空快捷方式目录。'}
-            $link=$shell.CreateShortcut($linkPath);$link.TargetPath="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-            $link.Arguments='-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+(Join-Path $install 'src\Controller.ps1')+'" -ConfigPath "'+$configPath+'" -Action '+$pair[1]
-            if($pair[1] -eq 'tray'){$link.TargetPath=$hostPath;$link.Arguments=''}
-            if($prebuilt -and $pair[1] -ne 'tray'){$link.TargetPath=$hostPath;$link.Arguments='--open-instance --role '+$pair[1]+' --config "'+$configPath+'"'}
-            $link.WorkingDirectory=$install;$link.IconLocation=(Join-Path $install ('assets\'+$pair[2]));$link.Save()
+            if($prebuilt){
+                $arguments=if($pair[1] -eq 'tray'){''}else{'--open-instance --role '+$pair[1]+' --config "'+$configPath+'"'}
+                [CodexDual.UnicodeShortcut]::Create($linkPath,$hostPath,$arguments,$install,(Join-Path $install ('assets\'+$pair[2])))
+            }else{
+                $link=$shell.CreateShortcut($linkPath);$link.TargetPath="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+                $link.Arguments='-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+(Join-Path $install 'src\Controller.ps1')+'" -ConfigPath "'+$configPath+'" -Action '+$pair[1]
+                if($pair[1] -eq 'tray'){$link.TargetPath=$hostPath;$link.Arguments=''}
+                $link.WorkingDirectory=$install;$link.IconLocation=(Join-Path $install ('assets\'+$pair[2]));$link.Save()
+            }
             $manifest.shortcuts+=@{path=$linkPath;sha256=(Get-FileHash -LiteralPath $linkPath).Hash};Save-Manifest
         }
     }
@@ -108,7 +113,8 @@ try {
     $installError=$_
     # A recovery-write failure must not replace the original installation error.
     try{Save-Manifest}catch{Write-Warning '安装记录补写失败；已有清单可能不完整。'}
-    Write-Warning ("安装未完成，失败阶段：$installStage。可运行安装目录 scripts\Uninstall.ps1 按已有清单回滚工具；数据保留。")
+    $uninstall=if($prebuilt){'scripts\Uninstall-DotNet.ps1 -Apply'}else{'scripts\Uninstall.ps1'}
+    Write-Warning ("安装未完成，失败阶段：$installStage。可运行安装目录 $uninstall 按已有清单回滚工具；数据保留。")
     throw $installError
 }
 finally{if($ApiKey){$ApiKey.Dispose()}}

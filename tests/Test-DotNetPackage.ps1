@@ -8,7 +8,10 @@ function Check($condition,[string]$name){if(-not $condition){throw ('FAIL: '+$na
 function Reject([scriptblock]$action,[string]$name){$rejected=$false;try{& $action|Out-Null}catch{$rejected=$true};Check $rejected $name}
 function Hash([string]$path){(Get-FileHash -LiteralPath $path).Hash}
 function Install-Fixture([string]$source,[string]$name){
- $target=Join-Path $root ($name+' 中文 space\Tool');$data=Join-Path $root ($name+' 中文 space\Data');$official=Join-Path $root ($name+' 中文 space\Official');$links=Join-Path $root ($name+' 中文 space\Links')
+ # The untouched 0.8.9 installer has a known ANSI WScript shortcut limitation.
+ # Exercise Unicode paths in the new installer, and migrate an ASCII legacy installation.
+ $folder=if($name -eq 'fresh'){$name+' 中文 space'}else{$name+' space'}
+ $target=Join-Path $root ($folder+'\Tool');$data=Join-Path $root ($folder+'\Data');$official=Join-Path $root ($folder+'\Official');$links=Join-Path $root ($folder+'\Links')
  $key=ConvertTo-SecureString 'synthetic-not-a-real-key' -AsPlainText -Force
  & (Join-Path $source 'scripts\Install.ps1') -InstallDirectory $target -DataDirectory $data -OfficialHome $official -Executable "$env:SystemRoot\System32\notepad.exe" -BaseUrl 'https://example.invalid/v1' -Model 'fixture' -ApiKey $key -ShortcutDirectory $links|Out-Host
  return $target
@@ -40,9 +43,9 @@ try{
  Check ((Hash (Join-Path $fresh 'CodexDualController.exe')) -eq (Hash (Join-Path $Package 'CodexDualController.exe'))) 'Fresh installation uses prebuilt C# app'
  $freshConfig=Get-Content -LiteralPath (Join-Path $fresh 'instances.local.json') -Raw -Encoding UTF8|ConvertFrom-Json
  $configHash=Hash (Join-Path $fresh 'instances.local.json');$keyPath=Join-Path $freshConfig.instances[1].apiRoot 'Credentials\api-key.dpapi';$keyHash=Hash $keyPath
- $links=Join-Path (Split-Path $fresh -Parent) 'Links';$shell=New-Object -ComObject WScript.Shell
- $apiLink=$shell.CreateShortcut((Join-Path $links 'Codex API.lnk'))
- Check ($apiLink.TargetPath -eq (Join-Path $fresh 'CodexDualController.exe') -and $apiLink.Arguments.Contains('--open-instance --role api')) 'Fresh API shortcut uses C# entry'
+ $links=Join-Path (Split-Path $fresh -Parent) 'Links'
+ $apiLink=[CodexDual.UnicodeShortcut]::Read((Join-Path $links 'Codex API.lnk'))
+ Check ($apiLink[0] -eq (Join-Path $fresh 'CodexDualController.exe') -and $apiLink[1].Contains('--open-instance --role api') -and $apiLink[2] -eq $fresh) 'Unicode shortcut roundtrip uses C# entry'
  Smoke $fresh 'dark';Smoke $fresh 'light'
  & (Join-Path $Package 'scripts\Set-DotNetTitle.ps1') -ConfigPath (Join-Path $fresh 'instances.local.json') -Mode enable -Model fixture|Out-Null
  $settings=Get-Content -LiteralPath (Join-Path $freshConfig.stateDirectory 'dotnet-title.local.json') -Raw -Encoding UTF8|ConvertFrom-Json
