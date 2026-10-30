@@ -7,7 +7,7 @@ namespace CodexDual.App;
 
 public sealed partial class MainWindow
 {
-    private readonly QuietListBox chats = new();
+    private readonly ModernList chats = new();
     private readonly TextBox titleText = new();
     private readonly Label generationStatus = new();
     private CancellationTokenSource? titleCancellation;
@@ -18,24 +18,25 @@ public sealed partial class MainWindow
     private readonly List<Task> titleTasks = [];
     private void BuildTitles(Panel page)
     {
-        AddLabel(page, "为 API 聊天生成标题", 0, 0, 660, 32).Font = new Font(Font.FontFamily, 15, FontStyle.Bold);
-        AddLabel(page, "选择聊天，生成建议后可编辑；点击保存才会改名。", 0, 40, 660, 35);
-        chats.SetBounds(0, 85, 670, 210); chats.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; page.Controls.Add(chats);
+        PageTitle(page, "标题工具");
+        AddButton(page, "返回高级", 630, 0, 140, () => SelectPage("诊断")).Quiet = true;
+        var listFrame = new SoftSurface(); listFrame.SetBounds(0, 88, 770, 268); page.Controls.Add(listFrame);
+        chats.SetBounds(10, 12, 750, 244); chats.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right; listFrame.Controls.Add(chats);
         chats.SelectedIndexChanged += (_, _) =>
         {
             titleCancellation?.Cancel(); editEpoch++;
             editingSuggestion = true; titleText.Text = chats.SelectedIndex >= 0 && chats.SelectedIndex < chatItems.Count ? chatItems[chats.SelectedIndex].Title : ""; editingSuggestion = false;
             generationStatus.Text = "";
         };
-        AddButton(page, "刷新聊天", 0, 310, 120, () => _ = RefreshThreads());
-        AddButton(page, "生成建议", 140, 310, 120, () => TrackGeneration(false)).Primary = true;
-        AddButton(page, "再想一个", 280, 310, 120, () => TrackGeneration(true));
-        AddButton(page, "打开聊天", 420, 310, 120, () => { if (SelectedChat() is { } c) RunUi(() => OpenInstance(config.Api, c.Id)); });
-        titleText.SetBounds(0, 366, 670, 32); titleText.MaxLength = 200; titleText.AccessibleName = "聊天标题"; page.Controls.Add(titleText);
+        AddButton(page, "生成建议", 0, 376, 150, () => TrackGeneration(false)).Primary = true;
+        AddButton(page, "换一个", 166, 376, 120, () => TrackGeneration(true)).Quiet = true;
+        AddButton(page, "打开聊天", 302, 376, 140, () => { if (SelectedChat() is { } c) RunUi(() => OpenInstance(config.Api, c.Id)); }).Quiet = true;
+        AddButton(page, "刷新", 658, 376, 112, () => _ = RefreshThreads()).Quiet = true;
+        titleText.MaxLength = 200; titleText.AccessibleName = "聊天标题"; PlaceInput(page, titleText, 0, 448, 770);
         titleText.TextChanged += (_, _) => { if (!editingSuggestion) { editEpoch++; titleCancellation?.Cancel(); generationStatus.Text = "已保留手动输入"; } };
-        AddButton(page, "保存标题", 0, 417, 120, () => RunUi(SaveTitle));
-        AddButton(page, "复制标题", 140, 417, 120, () => { if (titleText.Text.Length > 0) { Clipboard.SetText(titleText.Text); generationStatus.Text = "已复制"; } });
-        generationStatus.SetBounds(0, 470, 670, 60); page.Controls.Add(generationStatus);
+        AddButton(page, "保存", 0, 516, 120, () => RunUi(SaveTitle));
+        AddButton(page, "复制", 136, 516, 120, () => { if (titleText.Text.Length > 0) { Clipboard.SetText(titleText.Text); generationStatus.Text = "已复制"; } }).Quiet = true;
+        generationStatus.SetBounds(0, 580, 770, 32); generationStatus.Name = "Muted"; page.Controls.Add(generationStatus);
     }
     private ChatInfo? SelectedChat() => chats.SelectedIndex >= 0 && chats.SelectedIndex < chatItems.Count ? chatItems[chats.SelectedIndex] : null;
     private async Task RefreshThreads()
@@ -45,7 +46,7 @@ public sealed partial class MainWindow
         try
         {
             List<ChatInfo> incoming;
-            if (args.Contains("--smoke-ui")) incoming = [new(Guid.NewGuid().ToString(), "改进双环境性能与标题建议", ""), new(Guid.NewGuid().ToString(), "整理项目资料与开发计划", "")];
+            if (args.Contains("--smoke-ui")) incoming = [new(Guid.NewGuid().ToString(), "改进双环境性能与标题建议", ""), new(Guid.NewGuid().ToString(), "一条很长的聊天标题：整理开发计划、交互设计、环境设置与验收记录，检查单行省略显示是否正确\n这是第二行，不应该覆盖下一项", ""), new(Guid.NewGuid().ToString(), "整理项目资料与开发计划", ""), new(Guid.NewGuid().ToString(), "优化消息提醒", ""), new(Guid.NewGuid().ToString(), "检查环境设置", ""), new(Guid.NewGuid().ToString(), "完成日常开发", "")];
             else incoming = await Task.Run(() => new ThreadContext(config.Api.Home).List(), lifetime.Token);
             if (closed || epoch != refreshEpoch || edits != editEpoch) return;
             chatItems = incoming;
@@ -65,7 +66,7 @@ public sealed partial class MainWindow
         {
             var result = await titles.SuggestAsync(Guid.NewGuid().ToString(), chat.Id, chat.Title, refresh, cancel.Token);
             if (closed || cancel.IsCancellationRequested || epoch != editEpoch || SelectedChat()?.Id != chat.Id) return;
-            editingSuggestion = true; titleText.Text = result.Title; editingSuggestion = false; generationStatus.Text = result.Cached ? "已读取缓存建议；确认后点击保存" : "建议已生成；可编辑后保存";
+            editingSuggestion = true; titleText.Text = result.Title; editingSuggestion = false; generationStatus.Text = "建议已生成";
         }
         catch (OperationCanceledException) { if (epoch == editEpoch) generationStatus.Text = "生成已取消或超时"; }
         catch (Exception e) { if (!closed && epoch == editEpoch) generationStatus.Text = e.Message; }
@@ -80,7 +81,7 @@ public sealed partial class MainWindow
         if (status.Process == null) throw new IOException("请先打开 API 环境；也可复制建议后在原生窗口保存。");
         string cli = await Task.Run(() => ThreadRename.FindCli(config.Api, status.Process, config));
         await ThreadRename.RenameAsync(cli, config.Api, chat.Id, chat.Title, text, lifetime.Token);
-        generationStatus.Text = "标题已保存，并通过原生接口回读确认"; await RefreshThreads();
+        generationStatus.Text = "已保存"; await RefreshThreads();
     }
     private JsonObject LoadNotificationSettings()
     {
@@ -91,21 +92,23 @@ public sealed partial class MainWindow
     private bool Snoozed() => DateTimeOffset.TryParse(notificationSettings["snoozedUntilUtc"]?.GetValue<string>(), out var time) && time > DateTimeOffset.UtcNow;
     private void BuildNotifications(Panel page)
     {
-        AddLabel(page, "完成提醒", 0, 0, 660, 32).Font = new Font(Font.FontFamily, 15, FontStyle.Bold);
-        var enabled = new QuietSwitch { Text = "显示 API 任务完成提醒", Checked = notificationSettings["enabled"]?.GetValue<bool>() != false }; enabled.SetBounds(0, 45, 350, 36); page.Controls.Add(enabled);
+        PageTitle(page, "通知");
+        AddButton(page, "预览", 650, 0, 120, () => ShowNotice("完成提醒预览", "已完成", () => { }, true)).Quiet = true;
+        var enabled = new ModernToggle { Text = "完成提醒", Checked = notificationSettings["enabled"]?.GetValue<bool>() != false }; enabled.SetBounds(0, 88, 770, 48); page.Controls.Add(enabled);
         enabled.CheckedChanged += (_, _) => RunUi(async () => { notificationSettings["enabled"] = enabled.Checked; SaveNotificationSettings(); if (enabled.Checked) StartMonitor(); else if (monitor != null) { await monitor.DisposeAsync(); monitor = null; notice?.Close(); } });
-        AddButton(page, "预览提醒", 0, 95, 120, () => ShowNotice("完成提醒预览", "已完成", () => { }, true));
-        AddButton(page, "暂停 15 分钟", 140, 95, 150, () => { notificationSettings["snoozedUntilUtc"] = DateTimeOffset.UtcNow.AddMinutes(15).ToString("o"); SaveNotificationSettings(); notice?.Close(); feedback.Text = "通知已暂停 15 分钟"; });
-        AddButton(page, "恢复提醒", 310, 95, 120, () => { notificationSettings["snoozedUntilUtc"] = ""; SaveNotificationSettings(); feedback.Text = "通知已恢复"; });
-        AddLabel(page, "显示秒数（0 为常驻）", 0, 150, 230, 30);
-        var seconds = new NumericUpDown { Minimum = 0, Maximum = 3600, Value = notificationSettings["displaySeconds"]?.GetValue<int>() ?? 15 }; seconds.SetBounds(245, 150, 100, 30); page.Controls.Add(seconds);
-        var fade = new QuietSwitch { Text = "淡入淡出", Checked = notificationSettings["fadeEnabled"]?.GetValue<bool>() ?? false }; fade.SetBounds(375, 147, 180, 36); page.Controls.Add(fade);
+        Divider(page, 145); Divider(page, 213); Divider(page, 292);
+        AddLabel(page, "显示时长", 0, 156, 300, 46);
+        var seconds = new DurationPicker { Value = notificationSettings["displaySeconds"]?.GetValue<int>() ?? 15 }; seconds.SetBounds(530, 156, 240, 46); page.Controls.Add(seconds);
+        var fade = new ModernToggle { Text = "淡入淡出", Checked = notificationSettings["fadeEnabled"]?.GetValue<bool>() ?? false }; fade.SetBounds(0, 224, 770, 48); page.Controls.Add(fade);
         seconds.ValueChanged += (_, _) => { notificationSettings["displaySeconds"] = (int)seconds.Value; SaveNotificationSettings(); };
         fade.CheckedChanged += (_, _) => { notificationSettings["fadeEnabled"] = fade.Checked; SaveNotificationSettings(); };
-        AddLabel(page, "最近完成", 0, 204, 660, 30); recent.SetBounds(0, 240, 670, 200); page.Controls.Add(recent);
+        AddLabel(page, "最近完成", 0, 318, 300, 38);
+        QuietButton? snooze = null; snooze = AddButton(page, Snoozed() ? "恢复提醒" : "暂停 15 分钟", 590, 312, 180, () => { bool paused = Snoozed(); notificationSettings["snoozedUntilUtc"] = paused ? "" : DateTimeOffset.UtcNow.AddMinutes(15).ToString("o"); SaveNotificationSettings(); if (!paused) notice?.Close(); snooze!.Text = paused ? "暂停 15 分钟" : "恢复提醒"; }); snooze.Quiet = true;
+        var listFrame = new SoftSurface(); listFrame.SetBounds(0, 376, 770, 164); page.Controls.Add(listFrame); recent.SetBounds(10, 10, 750, 144); listFrame.Controls.Add(recent);
+        if (args.Contains("--smoke-ui")) { recent.Items.Add("整理项目资料"); recent.Items.Add("完成界面调整"); }
         recent.DoubleClick += (_, _) => { if (recent.SelectedIndex >= 0 && recent.SelectedIndex < history.Count) RunUi(() => OpenInstance(config.Api, history[recent.SelectedIndex].ThreadId)); };
-        AddButton(page, "待处理问题", 0, 460, 140, ShowPending);
-        AddButton(page, "预览提问窗口", 160, 460, 160, PreviewQuestion);
+        AddButton(page, "待处理问题", 0, 564, 170, ShowPending);
+        AddButton(page, "提问预览", 188, 564, 150, PreviewQuestion).Quiet = true;
     }
     private void StartMonitor()
     {
@@ -133,37 +136,30 @@ public sealed partial class MainWindow
     private void ShowNotice(string text, string summary, Action click, bool preview = false)
     {
         notice?.Close(); notice?.Dispose();
-        var card = notice = new CompletionCard { Text = summary, ClientSize = new Size(420, 146), ShowInTaskbar = false, TopMost = true, Font = Font, StartPosition = FormStartPosition.Manual };
-        AddLabel(card, summary, 20, 12, 340, 24).Name = "Muted";
-        var body = new NoticeBody { Text = text, AccessibleName = "打开：" + text }; body.SetBounds(8, 40, 402, 98); body.Click += (_, _) => { card.Close(); if (!preview) click(); }; card.Controls.Add(body);
-        AddButton(card, "×", 376, 8, 30, card.Close).Quiet = true;
+        var card = notice = new CompletionCard { Text = summary, ClientSize = new Size(460, 164), ShowInTaskbar = false, TopMost = true, Font = Font, StartPosition = FormStartPosition.Manual };
+        AddLabel(card, summary, 20, 12, 374, 28).Name = "Muted";
+        var body = new NoticeBody { Text = text, AccessibleName = "打开：" + text }; body.SetBounds(8, 44, 444, 110); body.Click += (_, _) => { card.Close(); if (!preview) click(); }; card.Controls.Add(body);
+        var dismiss = AddButton(card, "×", 410, 8, 40, card.Close); dismiss.Quiet = true; dismiss.Height = 36;
         card.SetDisplaySettings((notificationSettings["displaySeconds"]?.GetValue<int>() ?? 15) * 1000, notificationSettings["fadeEnabled"]?.GetValue<bool>() ?? false);
         var area = Screen.FromPoint(Cursor.Position).WorkingArea; card.Location = new Point(area.Right - card.Width - 20, area.Bottom - card.Height - 20); AppTheme.ApplyTo(card); card.Show();
     }
     private void BuildPreferences(Panel page)
     {
-        AddLabel(page, "外观与窗口", 0, 0, 660, 35).Font = new Font(Font.FontFamily, 15, FontStyle.Bold);
-        AddLabel(page, "主题", 0, 60, 150, 30); var mode = new QuietComboBox { DropDownStyle = ComboBoxStyle.DropDownList }; mode.Items.AddRange(["dark", "light", "system"]); mode.SelectedItem = preferences.Mode; mode.SetBounds(180, 60, 200, 32); page.Controls.Add(mode);
-        AddLabel(page, "强调色", 0, 110, 150, 30); var accent = new QuietComboBox { DropDownStyle = ComboBoxStyle.DropDownList }; accent.Items.AddRange(["neutral", "blue", "green", "purple"]); accent.SelectedItem = preferences.Accent; accent.SetBounds(180, 110, 200, 32); page.Controls.Add(accent);
-        void Appearance() { preferences.Data["appearance"] = new JsonObject { ["mode"] = mode.Text, ["accent"] = accent.Text }; preferences.Save(); AppTheme.SetAppearance(mode.Text, accent.Text); ApplyTheme(); }
-        mode.SelectedIndexChanged += (_, _) => Appearance(); accent.SelectedIndexChanged += (_, _) => Appearance();
-        var panelFocus = new QuietSwitch { Text = "打开控制面板时获取焦点", Checked = preferences.Behavior("panelMode", "focus") == "focus" }; panelFocus.SetBounds(0, 165, 480, 34); page.Controls.Add(panelFocus);
-        var panelTop = new QuietSwitch { Text = "控制面板置顶", Checked = preferences.Overlay("panelOverlay", false) }; panelTop.SetBounds(0, 210, 480, 34); page.Controls.Add(panelTop);
-        AddLabel(page, "后台提问方式", 0, 260, 170, 30); var questionMode = new QuietComboBox { DropDownStyle = ComboBoxStyle.DropDownList }; questionMode.Items.AddRange(["notice", "passive", "focus"]); questionMode.SelectedItem = preferences.Behavior("questionMode", "notice"); questionMode.SetBounds(180, 260, 200, 32); page.Controls.Add(questionMode);
-        void Behavior() { var behavior = preferences.Data["windowBehavior"] as JsonObject ?? new JsonObject(); behavior["panelMode"] = panelFocus.Checked ? "focus" : "passive"; behavior["panelOverlay"] = panelTop.Checked; behavior["questionMode"] = questionMode.Text; if (preferences.Data["windowBehavior"] == null) preferences.Data["windowBehavior"] = behavior; preferences.Save(); }
-        panelFocus.CheckedChanged += (_, _) => Behavior(); panelTop.CheckedChanged += (_, _) => Behavior(); questionMode.SelectedIndexChanged += (_, _) => Behavior();
+        PageTitle(page, "设置");
+        AddLabel(page, "主题", 0, 88, 320, 46); var mode = new ChoicePicker(("dark", "深色"), ("light", "浅色"), ("system", "跟随系统")) { Value = preferences.Mode, AccessibleName = "主题" }; mode.SetBounds(530, 88, 240, 46); page.Controls.Add(mode);
+        AddLabel(page, "强调色", 0, 156, 320, 46); var accent = new ChoicePicker(("neutral", "中性"), ("blue", "蓝色"), ("green", "绿色"), ("purple", "紫色")) { Value = preferences.Accent, AccessibleName = "强调色" }; accent.SetBounds(530, 156, 240, 46); page.Controls.Add(accent);
+        void Appearance() { preferences.Data["appearance"] = new JsonObject { ["mode"] = mode.Value, ["accent"] = accent.Value }; preferences.Save(); AppTheme.SetAppearance(mode.Value, accent.Value); ApplyTheme(); }
+        mode.ValueChanged += (_, _) => Appearance(); accent.ValueChanged += (_, _) => Appearance();
+        foreach (int y in new[] { 145, 220, 295, 363, 438, 522 }) Divider(page, y);
+        var panelFocus = new ModernToggle { Text = "打开时聚焦", Checked = preferences.Behavior("panelMode", "focus") == "focus" }; panelFocus.SetBounds(0, 238, 770, 48); page.Controls.Add(panelFocus);
+        var panelTop = new ModernToggle { Text = "窗口置顶", Checked = preferences.Overlay("panelOverlay", false) }; panelTop.SetBounds(0, 306, 770, 48); page.Controls.Add(panelTop);
+        AddLabel(page, "后台提问", 0, 374, 320, 46); var questionMode = new ChoicePicker(("notice", "通知提醒"), ("passive", "浮窗 · 不抢焦点"), ("focus", "浮窗 · 自动聚焦")) { Value = preferences.Behavior("questionMode", "notice"), AccessibleName = "后台提问方式" }; questionMode.SetBounds(530, 374, 240, 46); page.Controls.Add(questionMode);
+        void Behavior() { var behavior = preferences.Data["windowBehavior"] as JsonObject ?? new JsonObject(); behavior["panelMode"] = panelFocus.Checked ? "focus" : "passive"; behavior["panelOverlay"] = panelTop.Checked; behavior["questionMode"] = questionMode.Value; if (preferences.Data["windowBehavior"] == null) preferences.Data["windowBehavior"] = behavior; preferences.Save(); }
+        panelFocus.CheckedChanged += (_, _) => Behavior(); panelTop.CheckedChanged += (_, _) => Behavior(); questionMode.ValueChanged += (_, _) => Behavior();
         var titleSettings = TitleSettings.Load(config.StateDirectory);
-        AddLabel(page, "标题模型", 0, 320, 170, 30); var model = AddInput(page, titleSettings.Model, 180, 320, 310);
-        AddButton(page, "保存", 510, 316, 100, () => { titleSettings.Model = model.Text.Trim(); Json.Write(Path.Combine(config.StateDirectory, "dotnet-title.local.json"), titleSettings); feedback.Text = "标题模型已保存"; });
-        AddLabel(page, "凭据来源", 0, 375, 170, 30); var variable = AddInput(page, titleSettings.CredentialFiles.Keys.FirstOrDefault() ?? "", 180, 375, 220); variable.PlaceholderText = "渠道 env_key 名称";
-        AddButton(page, "选择 DPAPI 文件", 420, 370, 190, () =>
-        {
-            using var dialog = new OpenFileDialog { Filter = "加密凭据|*.dpapi", CheckFileExists = true };
-            if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            titleSettings.CredentialFiles[variable.Text.Trim()] = dialog.FileName; Json.Write(Path.Combine(config.StateDirectory, "dotnet-title.local.json"), titleSettings); feedback.Text = "已登记加密凭据文件；没有复制明文密钥";
-        });
-        AddLabel(page, "标题默认沿用 API 环境的地址与请求头，模型可单独设置。", 0, 430, 660, 45);
-        var auto = new QuietSwitch { Text = "登录 Windows 时启动控制器", Enabled = !args.Contains("--trial") }; auto.SetBounds(0, 480, 480, 34); page.Controls.Add(auto);
+        AddLabel(page, "标题模型", 0, 456, 300, 46); var model = AddInput(page, titleSettings.Model, 390, 456, 260);
+        AddButton(page, "保存", 666, 456, 104, () => { titleSettings.Model = model.Text.Trim(); Json.Write(Path.Combine(config.StateDirectory, "dotnet-title.local.json"), titleSettings); feedback.Text = "已保存"; });
+        var auto = new ModernToggle { Text = "开机启动", Enabled = !args.Contains("--trial") }; auto.SetBounds(0, 540, 770, 48); page.Controls.Add(auto);
         string startupName = "CodexDualController." + Paths.Hash(RuntimePaths.ConfigPath.ToLowerInvariant()).ToUpperInvariant()[..16];
         using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")) auto.Checked = key?.GetValue(startupName) is string;
         auto.CheckedChanged += (_, _) =>
@@ -173,17 +169,41 @@ public sealed partial class MainWindow
             if (auto.Checked) key.SetValue(startupName, "\"" + Environment.ProcessPath + "\" --background --config \"" + RuntimePaths.ConfigPath + "\""); else key.DeleteValue(startupName, false);
         };
     }
+    private void BuildAdvanced(Panel page)
+    {
+        PageTitle(page, "高级");
+        AddButton(page, "重新检查", 0, 88, 150, () => RunUi(RefreshStatus));
+        AddButton(page, "打开日志", 166, 88, 150, () => OpenFolder(config.StateDirectory)).Quiet = true;
+        AddButton(page, "标题工具", 332, 88, 150, () => SelectPage("标题建议")).Quiet = true;
+        AddButton(page, "凭据设置", 498, 88, 150, OpenCredentialSettings).Quiet = true;
+        diagnostics.SetBounds(0, 168, 770, 440); diagnostics.Name = "Muted"; diagnostics.Font = new Font(Font.FontFamily, 10.5f); pages["诊断"].Controls.Add(diagnostics);
+    }
+    private void OpenCredentialSettings()
+    {
+        var settings = TitleSettings.Load(config.StateDirectory);
+        using var dialog = new ShellForm { Text = "标题凭据", Font = Font, ClientSize = new Size(660, 230), StartPosition = FormStartPosition.CenterParent };
+        AddLabel(dialog, "环境变量", 28, 32, 180, 48); var variable = AddInput(dialog, settings.CredentialFiles.Keys.FirstOrDefault() ?? "", 210, 32, 418); variable.PlaceholderText = "env_key";
+        AddButton(dialog, "选择凭据文件", 210, 116, 206, () =>
+        {
+            using var picker = new OpenFileDialog { Filter = "加密凭据|*.dpapi", CheckFileExists = true };
+            if (picker.ShowDialog(dialog) != DialogResult.OK) return;
+            settings.CredentialFiles[variable.Text.Trim()] = picker.FileName; Json.Write(Path.Combine(config.StateDirectory, "dotnet-title.local.json"), settings); feedback.Text = "已保存"; dialog.Close();
+        });
+        AppTheme.ApplyTo(dialog); ModernStyle.Apply(dialog); dialog.ShowDialog(this);
+    }
     private void BuildApi(Panel page)
     {
-        AddLabel(page, "API 渠道与配置", 0, 0, 660, 35).Font = new Font(Font.FontFamily, 15, FontStyle.Bold);
+        PageTitle(page, "连接");
         string management;
         try { management = ApiProfiles.Mode(config.Api); } catch { management = "unavailable"; }
         if (management != "builtin")
         {
-            AddLabel(page, management == "external" ? "此环境使用已有外部启动器，渠道由原管理工具维护。" : "此环境由 CC Switch 管理。", 0, 60, 650, 60);
-            AddButton(page, "打开 API 配置", 0, 150, 180, () => { var info = new ProcessStartInfo("notepad.exe") { UseShellExecute = false }; info.ArgumentList.Add(Path.Combine(config.Api.Home, "config.toml")); Process.Start(info); });
-            AddButton(page, "打开环境目录", 200, 150, 180, () => OpenFolder(config.Api.Home));
-            AddButton(page, "选择并打开 CC Switch", 0, 210, 240, () =>
+            AddLabel(page, "API 渠道", 0, 96, 400, 36);
+            AddLabel(page, management == "external" ? "外部管理" : "CC Switch", 530, 96, 240, 36).Name = "Muted";
+            Divider(page, 146);
+            AddButton(page, "配置文件", 0, 164, 170, () => { var info = new ProcessStartInfo("notepad.exe") { UseShellExecute = false }; info.ArgumentList.Add(Path.Combine(config.Api.Home, "config.toml")); Process.Start(info); });
+            AddButton(page, "数据目录", 188, 164, 170, () => OpenFolder(config.Api.Home)).Quiet = true;
+            AddButton(page, "打开 CC Switch", 0, 246, 220, () =>
             {
                 using var picker = new OpenFileDialog { Filter = "CC Switch|*.exe", CheckFileExists = true };
                 string path = preferences.Data["ccsExecutable"]?.GetValue<string>() ?? "";
@@ -192,26 +212,27 @@ public sealed partial class MainWindow
             });
             return;
         }
-        var list = new QuietListBox(); list.SetBounds(0, 55, 670, 160); page.Controls.Add(list); ProfileList? profiles = null;
+        var frame = new SoftSurface(); frame.SetBounds(0, 88, 770, 242); page.Controls.Add(frame);
+        var list = new ModernList(); list.SetBounds(10, 10, 750, 222); frame.Controls.Add(list); ProfileList? profiles = null;
         void Reload() { try { profiles = ApiProfiles.Read(config.Api); list.Items.Clear(); foreach (var item in profiles.Profiles) list.Items.Add(item); } catch (Exception e) { feedback.Text = e.Message; } }
-        AddButton(page, "新增", 0, 235, 100, () => Edit(null));
-        AddButton(page, "编辑", 120, 235, 100, () => { if (list.SelectedItem is ApiProfile item) Edit(item); });
-        AddButton(page, "应用", 240, 235, 100, () => { if (list.SelectedItem is ApiProfile item) RunUi(async () => { feedback.Text = await Task.Run(() => ApiProfiles.Apply(config, config.Api, item.Id, processes)); Reload(); }); });
-        AddButton(page, "删除", 360, 235, 100, () => { if (list.SelectedItem is ApiProfile item && MessageBox.Show(this, "删除渠道“" + item.Name + "”？", "删除渠道", MessageBoxButtons.OKCancel) == DialogResult.OK) RunUi(() => { ApiProfiles.Remove(config.Api, item.Id); Reload(); return Task.CompletedTask; }); });
-        AddButton(page, "备份配置", 0, 300, 150, () => RunUi(() => { ApiProfiles.Backup(config.Api, "手动备份"); feedback.Text = "配置已加密备份"; return Task.CompletedTask; }));
-        AddButton(page, "恢复配置…", 170, 300, 150, () =>
+        AddButton(page, "新增", 0, 354, 120, () => Edit(null));
+        AddButton(page, "编辑", 138, 354, 120, () => { if (list.SelectedItem is ApiProfile item) Edit(item); }).Quiet = true;
+        AddButton(page, "应用", 276, 354, 120, () => { if (list.SelectedItem is ApiProfile item) RunUi(async () => { feedback.Text = await Task.Run(() => ApiProfiles.Apply(config, config.Api, item.Id, processes)); Reload(); }); }).Primary = true;
+        AddButton(page, "删除", 650, 354, 120, () => { if (list.SelectedItem is ApiProfile item && MessageBox.Show(this, "删除渠道“" + item.Name + "”？", "删除渠道", MessageBoxButtons.OKCancel) == DialogResult.OK) RunUi(() => { ApiProfiles.Remove(config.Api, item.Id); Reload(); return Task.CompletedTask; }); }).Quiet = true;
+        AddButton(page, "备份", 0, 442, 120, () => RunUi(() => { ApiProfiles.Backup(config.Api, "手动备份"); feedback.Text = "已备份"; return Task.CompletedTask; })).Quiet = true;
+        AddButton(page, "恢复…", 138, 442, 120, () =>
         {
             using var picker = new OpenFileDialog { InitialDirectory = Path.Combine(config.Api.ApiRoot, "Backup"), Filter = "配置快照|snapshot-*.local.json" };
             if (picker.ShowDialog(this) == DialogResult.OK) RunUi(async () => { await Task.Run(() => ApiProfiles.Restore(config.Api, picker.FileName, processes)); Reload(); feedback.Text = "配置已恢复"; });
-        });
-        AddLabel(page, "运行期间应用渠道会暂存，等待 API 环境下次启动。", 0, 365, 660, 55);
+        }).Quiet = true;
         void Edit(ApiProfile? item)
         {
-            using var dialog = new ShellForm { Text = item == null ? "新增 API 渠道" : "编辑 API 渠道", Font = Font, ClientSize = new Size(580, 340), StartPosition = FormStartPosition.CenterParent };
-            string[] labels = ["名称", "API 地址", "模型", "密钥（留空保留）"]; var boxes = new List<TextBox>(); string[] values = [item?.Name ?? "", item?.BaseUrl ?? "", item?.Model ?? "", ""];
-            for (int n = 0; n < labels.Length; n++) { AddLabel(dialog, labels[n], 16, 25 + n * 60, 150, 30); boxes.Add(AddInput(dialog, values[n], 180, 25 + n * 60, 370, n == 3)); }
-            AddButton(dialog, "保存", 420, 275, 130, () => { try { ApiProfiles.Save(config.Api, item?.Id, boxes[0].Text, boxes[1].Text, boxes[2].Text, boxes[3].Text); boxes[3].Clear(); dialog.DialogResult = DialogResult.OK; } catch (Exception e) { MessageBox.Show(dialog, e.Message); } });
-            AppTheme.ApplyTo(dialog); if (dialog.ShowDialog(this) == DialogResult.OK) Reload();
+            using var dialog = new ShellForm { Text = item == null ? "新增渠道" : "编辑渠道", Font = Font, ClientSize = new Size(720, 410), StartPosition = FormStartPosition.CenterParent };
+            string[] labels = ["名称", "API 地址", "模型", "密钥"]; var boxes = new List<TextBox>(); string[] values = [item?.Name ?? "", item?.BaseUrl ?? "", item?.Model ?? "", ""];
+            for (int n = 0; n < labels.Length; n++) { AddLabel(dialog, labels[n], 28, 28 + n * 74, 150, 48); boxes.Add(AddInput(dialog, values[n], 190, 28 + n * 74, 500, n == 3)); }
+            boxes[3].PlaceholderText = item == null ? "输入密钥" : "留空保留";
+            AddButton(dialog, "保存", 550, 336, 140, () => { try { ApiProfiles.Save(config.Api, item?.Id, boxes[0].Text, boxes[1].Text, boxes[2].Text, boxes[3].Text); boxes[3].Clear(); dialog.DialogResult = DialogResult.OK; } catch (Exception e) { MessageBox.Show(dialog, e.Message); } }).Primary = true;
+            AppTheme.ApplyTo(dialog); ModernStyle.Apply(dialog); if (dialog.ShowDialog(this) == DialogResult.OK) Reload();
         }
         Reload();
     }

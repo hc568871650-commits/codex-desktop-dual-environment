@@ -268,7 +268,14 @@ public sealed class TitleService : IDisposable
         finally
         {
             if (process != null) { if (!process.HasExited) { process.Kill(); await process.WaitForExitAsync(); } process.Dispose(); }
-            if (Paths.Inside(folder, root)) Directory.Delete(folder, true);
+            if (Paths.Inside(folder, root))
+            {
+                // Windows scanners or a closing CLI child can retain a handle briefly.
+                // Cleanup must not turn a successfully generated title into a failure.
+                try { Directory.Delete(folder, true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
     }
     public static string ValidateTitle(string value)
