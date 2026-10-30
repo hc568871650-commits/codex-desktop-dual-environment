@@ -71,7 +71,8 @@ await Check("title transport routing cache and zero tools", async () =>
     string home = Path.Combine(root, "title-home"), state = Path.Combine(root, "title-state"); Directory.CreateDirectory(home); Directory.CreateDirectory(state);
     string keyFile = Path.Combine(root, "fixture.dpapi"); File.WriteAllText(keyFile, SecretStore.Protect("fixture-key"));
     string config = "model_provider='test'\n[model_providers.test]\nbase_url='https://example.invalid/v1'\nenv_key='CODEX_DUAL_TEST_KEY'\nwire_api='responses'\nhttp_headers={ 'x-fixture'='a,b' }\n";
-    File.WriteAllText(Path.Combine(home, "config.toml"), config); Json.Write(Path.Combine(state, "dotnet-title.local.json"), new TitleSettings { Model = "test-model", Transport = "responses", CredentialFiles = new() { ["CODEX_DUAL_TEST_KEY"] = keyFile } });
+    Assert(!TitleSettings.Load(state).Enabled, "New installations must not enable title requests");
+    File.WriteAllText(Path.Combine(home, "config.toml"), config); Json.Write(Path.Combine(state, "dotnet-title.local.json"), new TitleSettings { Enabled = true, Model = "test-model", Transport = "responses", CredentialFiles = new() { ["CODEX_DUAL_TEST_KEY"] = keyFile } });
     var handler = new RecordingHandler(); using var service = new TitleService(new() { Home = home }, state, new HealthStore(state), handler);
     var first = await service.GenerateAsync(Guid.NewGuid().ToString(), thread, "old", [new("user", "synthetic topic")], false, CancellationToken.None);
     var second = await service.GenerateAsync(Guid.NewGuid().ToString(), thread, "old", [new("user", "synthetic topic")], false, CancellationToken.None);

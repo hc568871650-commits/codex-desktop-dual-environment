@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Receipt,[switch]$Apply)
+﻿param([Parameter(Mandatory)][string]$Receipt,[switch]$Apply)
 $ErrorActionPreference='Stop'
 $r=Get-Content -LiteralPath $Receipt -Raw -Encoding UTF8|ConvertFrom-Json
 if($r.schema -ne 1 -or -not $r.applied){throw 'Receipt does not describe an applied installation.'}

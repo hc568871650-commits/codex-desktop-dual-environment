@@ -1,13 +1,19 @@
-name: Windows launcher checks
+name: Windows controller checks
 on:
   push:
   pull_request:
 jobs:
   test:
+    name: Legacy compatibility (0.8.9 metadata fixture)
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Use stable metadata for legacy-only installer regression
+        shell: powershell
+        run: |
+          # This job does not produce the C# release. Old installers parse System.Version.
+          '{"product":"codex-desktop-dual-environment","version":"0.8.9","buildRevision":"legacy-test-fixture","releaseChannel":"stable"}' | Set-Content version.json -Encoding UTF8
       - name: Test shortcut encoding on Windows PowerShell 5.1
         shell: powershell
         run: ./tests/Trace-ShortcutEncoding.ps1
@@ -23,7 +29,7 @@ jobs:
             & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "./experiments/notification-bridge/tests/$test.ps1"
             if ($LASTEXITCODE -ne 0) { throw "$test failed with exit code $LASTEXITCODE" }
           }
-      - name: Build release
+      - name: Exercise legacy package builders (not published)
         shell: powershell
         run: |
           ./scripts/Build-Release.ps1
@@ -38,7 +44,51 @@ jobs:
             test-results/validation-*/summary.json
             test-results/*/evidence.json
           if-no-files-found: ignore
+  dotnet:
+    name: C# public package
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test current title renderer in isolated browser
+        shell: powershell
+        run: |
+          npm install --prefix test-results/browser playwright@1.56.1
+          if ($LASTEXITCODE -ne 0) { throw 'Browser dependency install failed' }
+          $env:NODE_PATH = Join-Path $pwd 'test-results/browser/node_modules'
+          $env:TITLE_TEST_CHANNEL = 'msedge'
+          $env:TITLE_RENDERER_UNDER_TEST = Join-Path $pwd 'dotnet/CodexDual.App/title-renderer.js'
+          node experiments/title-suggestions/native/test_renderer.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Renderer checks failed' }
+      - name: Build self-contained release and run core checks
+        shell: powershell
+        run: ./scripts/Build-DotNetRelease.ps1 -OutputDirectory "$pwd/dist/release"
+      - name: Download and verify public migration baseline
+        shell: powershell
+        run: |
+          Invoke-WebRequest 'https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/download/v0.8.9/CodexDualLauncher-0.8.9-windows.zip' -OutFile baseline.zip
+          if ((Get-FileHash baseline.zip).Hash -ne 'd90a269348e445bdf8d00f20fa2dc1854fbdfd2a4ffe33df72ffffb89d7ac52f') { throw 'Baseline checksum mismatch' }
+          Expand-Archive baseline.zip baseline
+      - name: Test distribution, fresh install, migration, rollback and uninstall
+        shell: powershell
+        run: |
+          Expand-Archive dist/release/*.zip test-results/download
+          ./tests/Test-DotNetPackage.ps1 -Package "$pwd/test-results/download" -LegacyPackage "$pwd/baseline" -OutputDirectory "$pwd/test-results/dotnet-package"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dotnet-validation
+          path: test-results/dotnet-package/*.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
-          name: CodexDualLauncher-windows
-          path: dist/*.zip
+          name: CodexDualController-win-x64
+          path: |
+            dist/release/*.zip
+            dist/release/SHA256SUMS.txt

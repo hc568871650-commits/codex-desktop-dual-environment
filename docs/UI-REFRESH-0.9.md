@@ -1,4 +1,4 @@
-# 0.9.0-preview.2 界面更新
+﻿# 0.9.0-preview.2 界面更新
 
 2026-10-30，已更新本机控制器。
 
@@ -11,7 +11,7 @@
 
 验证：22 项核心检查通过；深浅两套主题各 6 页绘制、退出及页头按钮命中检查通过。没有为样式验证启动额外的完整 Codex Desktop，也没有调用真实模型。
 
-证据在 `E:\codex\codex双开\local-updates\ui-refresh-20261030`，包括 `smoke-header-dark.json`、`smoke-header-light.json`、`installation-final.json` 和界面截图。安装后确认原 Codex Desktop / CLI 进程身份保持，API 配置与实例登记未改变。
+证据在 `开发机私有证据目录（不分发）`，包括 `smoke-header-dark.json`、`smoke-header-light.json`、`installation-final.json` 和界面截图。安装后确认原 Codex Desktop / CLI 进程身份保持，API 配置与实例登记未改变。
 
 安装目录内 `回退本次界面更新.cmd` 恢复更新前的 C# 界面；原来的 `回退到PowerShell控制器.cmd` 仍可用，回退校验已按最终安装文件更新。
 
@@ -19,4 +19,4 @@
 
 修复选择下拉选项后出现 `Cannot access a disposed object: CodexDual.QuietMenu`。`Closed` 事件发生时 WinForms 仍可能继续访问菜单，因此不再在该事件里销毁菜单。每个选项控件复用一个菜单，随控件一起释放；再次打开时更新主题和勾选状态。
 
-在独立 WinForms 窗口中，对主题、强调色和后台提问三个菜单执行了三轮共 30 次选项切换，另验证取消后再次打开及页面头部按钮命中。检查通过，证据为 `E:\codex\codex双开\local-updates\ui-menu-fix-20261030\menu-regression.json`。
+在独立 WinForms 窗口中，对主题、强调色和后台提问三个菜单执行了三轮共 30 次选项切换，另验证取消后再次打开及页面头部按钮命中。检查通过，证据为 `开发机私有证据目录（不分发）`。

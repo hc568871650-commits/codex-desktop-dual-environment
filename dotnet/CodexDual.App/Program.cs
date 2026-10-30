@@ -24,6 +24,13 @@ internal static class Program
             string alternate = Option(args, "--state-directory"); if (alternate.Length > 0) { config.StateDirectory = Paths.Full(alternate); config.Validate(); }
             string exe = Environment.ProcessPath!;
             if (args.Contains("--launch-helper")) { LaunchHelper(config, Option(args, "--role")); return 0; }
+            if (args.Contains("--open-instance"))
+            {
+                var instance = config.Instances.Single(i => i.Role == Option(args, "--role"));
+                var target = new ProcessManager(config, exe).OpenAsync(instance, null, CancellationToken.None).GetAwaiter().GetResult();
+                Native.FocusKnownVisible(target.Id, target.Started, target.Path, target.Command, instance.Home, instance.Profile);
+                return 0;
+            }
             if (args.Contains("--open-thread"))
             {
                 var manager = new ProcessManager(config, exe);

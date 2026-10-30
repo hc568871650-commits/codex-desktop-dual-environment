@@ -1,14 +1,16 @@
-# Codex Desktop 双环境
+﻿# Codex Desktop 双环境
 
 **在 Windows 上同时使用官方订阅与自选 API，用一个控制器管理两个 Codex Desktop。**
 
-本分支新增 [C# / .NET 10 本机迁移预览](docs/DOTNET-MIGRATION.md)，代码与构建入口位于 `dotnet/` 和 `scripts/Build-DotNet.ps1`。预览的安装、性能证据和剩余验收边界见该文档；下面的公开发布说明仍对应 0.8.9 标准包。
+**当前开发版本：0.9.0-preview.4（C# 公开预览）**。主程序改为 C# / .NET 10，公开包自带运行时，支持首次安装、从 0.8.9 升级、回退与卸载。请使用 [预览版安装指南](docs/DOTNET-INSTALL.md)、[发布说明](docs/RELEASE-0.9.0-preview.4.md)与 [预览下载](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/tag/v0.9.0-preview.4)。标题建议和提问桥接保留实验边界。稳定版仍为 0.8.9，下面的旧版配图、要求和操作说明均对应稳定版。
+
+构建 C# 公共包：`scripts/Build-DotNetRelease.ps1 -OutputDirectory <new-directory>`；版本以根 `version.json` 为准。旧 `Build-Release.ps1` / `Build-UpgradePackage.ps1` 仅供 0.8.x 兼容检查，不用于构建本预览版。
 
 两套 Desktop 可以同时打开，分别使用自己的配置与凭据入口。你负责把任务分给两个窗口；控制器负责启动、找回窗口、管理 API 渠道，以及提供 API 任务提醒。
 
 [公开版下载](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/latest) · [快速开始](#快速开始) · [升级指南](docs/UPGRADE.md) · [0.8.9 发布说明](docs/RELEASE-0.8.9.md) · [验证记录](docs/VALIDATION.md)
 
-> **当前版本：0.8.9。** 标准范围包括一次确认退出、重复打开修复、六项只读组件诊断、安全登记刷新和隐藏草稿保护。自动适配、原生标题建议与守护兼容补丁均为独立源码实验，不包含在标准 ZIP 内，组合体验尚待验收。见 [版本说明](docs/VERSION-0.8.9.md)与 [v0.8.9 Release](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/tag/v0.8.9)。
+> **当前稳定版本：0.8.9。** 标准范围包括一次确认退出、重复打开修复、六项只读组件诊断、安全登记刷新和隐藏草稿保护。自动适配、原生标题建议与守护兼容补丁均为独立源码实验，不包含在标准 ZIP 内，组合体验尚待验收。见 [版本说明](docs/VERSION-0.8.9.md)与 [v0.8.9 Release](https://github.com/hc568871650-commits/codex-desktop-dual-environment/releases/tag/v0.8.9)。
 
 ![0.8.8 双环境控制面板](docs/images/0.8.8/overview-dark.png)
 

@@ -45,7 +45,7 @@ public static class SecretStore
 public sealed class TitleSettings
 {
     public int Schema { get; set; } = 1;
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; } = false;
     public string Model { get; set; } = "gpt-6-luna";
     public string Transport { get; set; } = "codex-cli";
     public Dictionary<string, string> CredentialFiles { get; set; } = new(StringComparer.Ordinal);

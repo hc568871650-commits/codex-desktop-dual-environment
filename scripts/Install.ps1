@@ -53,13 +53,19 @@ $config=[pscustomobject]@{schema=1;stateDirectory=(Join-Path $install 'state');i
 $tempConfig=Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString('N')+'.json')
 try{Write-AtomicText $tempConfig ($config | ConvertTo-Json -Depth 6);[void](Read-ControllerConfig $tempConfig)}finally{if(Test-Path -LiteralPath $tempConfig){[IO.File]::Delete($tempConfig)}}
 $source=Split-Path $PSScriptRoot -Parent
+$prebuilt=Test-Path -LiteralPath (Join-Path $source 'dotnet-manifest.json')
+if($prebuilt){
+    . "$PSScriptRoot\DotNet-Package.ps1"
+    $payload=Read-DotNetPackage $source
+}
 [void][IO.Directory]::CreateDirectory($install)
 $manifest=[ordered]@{schema=1;root=$install;files=@();shortcuts=@();retainedData=@($official,$data);created= [DateTime]::UtcNow.ToString('o')}
 function Save-Manifest {Write-AtomicText (Join-Path $install 'install-manifest.json') ($manifest | ConvertTo-Json -Depth 6)}
 Save-Manifest
 $installStage='复制工具文件'
 try {
-    foreach($part in @('.gitignore','version.json','src','scripts','assets','config','docs','README.md','Controller.cmd','Uninstall.cmd','Start.cmd','Install.cmd','Configure.cmd','Upgrade.cmd','Rollback.cmd')){
+    $parts=if($prebuilt){@($payload.files.path)+@('dotnet-manifest.json')}else{@('.gitignore','version.json','src','scripts','assets','config','docs','README.md','Controller.cmd','Uninstall.cmd','Start.cmd','Install.cmd','Configure.cmd','Upgrade.cmd','Rollback.cmd')}
+    foreach($part in $parts){
         $sourcePart=Join-Path $source $part
         if(-not (Test-Path -LiteralPath $sourcePart)){continue}
         $items=if(Test-Path -LiteralPath $sourcePart -PathType Container){@(Get-ChildItem -LiteralPath $sourcePart -File -Recurse)}else{@(Get-Item -LiteralPath $sourcePart)}
@@ -76,8 +82,12 @@ try {
     Write-AtomicText $configPath ($config | ConvertTo-Json -Depth 6)
     $hostPath=Join-Path $install 'CodexDualController.exe'
     $installStage='编译控制器 EXE'
-    & "$PSScriptRoot\Build-ControllerHost.ps1" -Destination $hostPath | Out-Null
-    $manifest.files+=@{path='CodexDualController.exe';sha256=(Get-FileHash -LiteralPath $hostPath).Hash};Save-Manifest
+    if(-not $prebuilt){
+        & "$PSScriptRoot\Build-ControllerHost.ps1" -Destination $hostPath | Out-Null
+        $manifest.files+=@{path='CodexDualController.exe';sha256=(Get-FileHash -LiteralPath $hostPath).Hash}
+    }
+    $manifest.version=(Get-Content -LiteralPath (Join-Path $source 'version.json') -Raw -Encoding UTF8|ConvertFrom-Json).version
+    Save-Manifest
     # Local configuration is retained on uninstall as a recovery aid; it contains no credentials.
     if(-not $NoShortcuts){
         $installStage='创建快捷方式'
@@ -88,6 +98,7 @@ try {
             $link=$shell.CreateShortcut($linkPath);$link.TargetPath="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
             $link.Arguments='-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+(Join-Path $install 'src\Controller.ps1')+'" -ConfigPath "'+$configPath+'" -Action '+$pair[1]
             if($pair[1] -eq 'tray'){$link.TargetPath=$hostPath;$link.Arguments=''}
+            if($prebuilt -and $pair[1] -ne 'tray'){$link.TargetPath=$hostPath;$link.Arguments='--open-instance --role '+$pair[1]+' --config "'+$configPath+'"'}
             $link.WorkingDirectory=$install;$link.IconLocation=(Join-Path $install ('assets\'+$pair[2]));$link.Save()
             $manifest.shortcuts+=@{path=$linkPath;sha256=(Get-FileHash -LiteralPath $linkPath).Hash};Save-Manifest
         }
